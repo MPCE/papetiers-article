@@ -1,12 +1,27 @@
-# Use the matches found by dedupe to update the data.
+########################################################################################################
+#
+# Papetiers Article
+#
+# Project: Mapping Print, Charting Enlightenment
+#
+# Script: Intitial run, exporting data from database.
+#
+# Authors: Rachel Hendery, Michael Falk
+#
+# Date: 24/10/18
+#
+########################################################################################################
+
+# Load necessary packages
 library(tidyverse)
 library(magrittr)
-
-# Estbalish connection to database
 library(RMySQL)
+
+# Establish connection to database
 manuscripts <- dbConnect(MySQL(), user="root", dbname="manuscripts", host="localhost")
 info_schema <- dbConnect(MySQL(), user="root", dbname="information_schema", host="localhost")
 
+# Query database, fetch necessary data
 clients <- manuscripts %>%
 dbSendQuery("SELECT * FROM clients") %>%
   dbFetch(n = Inf) %>%
@@ -32,54 +47,17 @@ clients_places <- manuscripts %>%
   dbFetch(n = Inf) %>%
   as_tibble()
 
+# Filter clients by profession to get list of papermakers
 papermaker_list <- filter(clients_professions, profession_code == "pf171")
 
+# Add place data to papermakers
 papermakers <- clients %>%
   filter(client_code %in% papermaker_list$client_code) %>%
   left_join(clients_places, by = "client_code") %>%
   left_join(placenames, by = "place_code") %>%
   mutate(other_documents = number_of_documents - number_of_letters)
 
+# Export as csv for use in other programs.
 write_csv(papermakers, "data/papermakers_with_places.csv")
 
-
-
-# Did the intensity of correspondence decline with distance from neuchatel?
-cor.test(papermakers$number_of_documents, papermakers$distance_from_neuchatel, alternative = "less", method = "spearman")
-
-papermakers %>%
-  ggplot(aes(number_of_documents)) +
-  geom_histogram(binwidth = 50)
-
-papermakers %>%
-  ggplot(aes(number_of_documents, distance_from_neuchatel)) +
-  geom_point()
-
-# Does every client have a place?
-papermakers %>%
-  sum(is.null(.$latitude))
-
-# Top papermakers as percentage of total documents
-
-
-# Abstract question 1:
-
-# Who were the top papermakers the STN used?
-papermakers %>%
-  filter(number_of_documents > 20.75) %>%
-  arrange(desc(number_of_documents)) %>%
-  select(client_name, number_of_letters, other_documents, name, distance_from_neuchatel) %>%
-  write_csv("data/most_important_papetiers.csv")
-# How far did the paper have to come?
-papermakers %>%
-  mutate(intensity = number_of_documents/sum(number_of_documents)) %>%
-  summarise(paper_distance = weighted.mean(distance_from_neuchatel, intensity))
-# Which towns had the most intense relationships?
-papermakers %>%
-  mutate(document_prop = number_of_documents/sum(number_of_documents)) %>%
-  group_by(name, distance_from_neuchatel) %>%
-  summarise(document_prop = sum(document_prop)) %>%
-  arrange(desc(document_prop)) %>%
-  ungroup() %>%
-  mutate(total = cumsum(document_prop)) %>%
-  write_csv("data/top_two_thirds_places.csv")
+## END
