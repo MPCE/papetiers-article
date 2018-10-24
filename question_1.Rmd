@@ -1,0 +1,95 @@
+---
+title: "Abstract question 1"
+output:
+  html_document:
+    df_print: paged
+---
+# Question 1: Where the STN's paper came from
+Where were the STN’s most important suppliers based and how far did the paper they used travel before arriving at their printing house in the Place Pury in Neuchâtel?
+
+The first cell loads the necessary packages and the data for this notebook.
+```{r message=FALSE}
+library(tidyverse, quietly = T)
+library(magrittr, quietly = T)
+library(lubridate, quietly = T)
+```
+And this cell loads the data:
+```{r message=FALSE}
+papermakers <- read_csv("data/papermakers_with_places.csv")
+papermakers
+```
+## Who were the most important suppliers?
+The data does not tell us how much paper was actually supplied by the different papetiers. But we do know how many documents are in the STN archive from each supplier. We can use this to judge who the most important suppliers were.
+
+First we can find the cutoff: what number of documents would put a supplier among the most important 25%
+```{r}
+third_quartile <- quantile(papermakers$number_of_documents, 0.75)
+```
+The third quartile is `r third_quartile`, so that `r third_quartile` documents is a good cutoff to determine who was 'important'. Though it must be noted that the top two papetiers both have more than 150 documents in the archive.
+
+```{r}
+papermakers %>%
+  filter(number_of_documents > third_quartile) %>%
+  arrange(desc(number_of_documents)) %>%
+  select(client_name, number_of_letters, other_documents, name, distance_from_neuchatel) %T>%
+  write_csv("most_important_papetiers.csv")
+```
+## How far did the paper have to come?
+Another question is how far away the paper had to come before it arrived in the STN's printing house.
+
+If we assume that the amount of paper ordered is roughly in proportion to the number of letters in the archive, then we can take a weighted average:
+```{r}
+average_distance <- papermakers %>%
+  mutate(intensity = number_of_documents/sum(number_of_documents)) %>%
+  summarise(paper_distance = weighted.mean(distance_from_neuchatel, intensity))
+```
+According to this calculation, the paper had to come on average `r round(unlist(average_distance), digits = 2)`km before it arrived at the STN, at least as the crow flies. This makes sense if we look at the top four towns from which the paper came:
+```{r}
+papermakers %>%
+  mutate(document_prop = number_of_documents/sum(number_of_documents)) %>%
+  group_by(name, distance_from_neuchatel) %>%
+  summarise(document_prop = sum(document_prop)) %>%
+  arrange(desc(document_prop)) %>%
+  ungroup() %>%
+  mutate(total = cumsum(document_prop)) %T>%
+  write_csv("data/top_two_thirds_places.csv")
+```
+As the table shows, the top four locations account for roughly 2/3 of the STN's correspondence with papetiers. Three of the locations are less than 100 kilometres away as the crow flies, but the second most important location, Lyon, is 211km away.
+
+## Did the intensity of correspondence decline with distance from neuchatel?
+It would stand to reason if, overall, closer suppliers were preferred by the STN. And indeed it seems that this was so.
+```{r}
+papermakers %>%
+  ggplot(aes(number_of_documents, distance_from_neuchatel, color = (in_lyon = name == "LYON"))) +
+  geom_point() +
+  labs(
+    x = "Number of documents in the STN archive",
+    y = "Distance from Neuchatel (km)",
+    color = "In Lyon?",
+    title = "Generally the more active suppliers are closer to Neuchatel"
+  )
+```
+
+Statistical analysis suggests, however, that the correlation between distance and intensity of correspondence is not very strong:
+```{r message=FALSE, warning=FALSE}
+stats_results <- cor.test(papermakers$number_of_documents, papermakers$distance_from_neuchatel, alternative = "less", method = "spearman")
+```
+According to Spearman's rank correlation coefficient, there is a relatively small correlation of `r stats_results$estimate` with a relatively high p-value of `r stats_results$p.value`.
+
+It is obvious why this is the case: there is a nexus of `r nrow(filter(papermakers, name == "LYON"))` suppliers centred around Lyon, who as we have seen account for 16% of the STN's correspondence with papetiers. They were particularly present in the archive around the 1770s:
+```{r}
+filter(papermakers, name == "LYON") %>%
+  select(client_name, name, number_of_documents, first_date, last_date)
+```
+*note*
+
+Spearman's rank correlation coefficient was chosen because the data appears to be non-parametric, even when plotted on a logarithmic scale:
+```{r}
+papermakers %>%
+  ggplot(aes(number_of_documents)) +
+  geom_histogram(binwidth = 20)
+```
+
+## Questions
+
+The most obvious question that arises from this first analysis is: what was so special about Besancon and Lyon? Was Lyon's highly developed textiles industry a good source of rags, the raw material of eighteenth-century paper? Could we perhaps correlate these patterns with the population size of different centres? Is our current measurement of 'distance from Neuchatel', kilometres as the crow flies, a useful metric at all? Can we find out how far these places were from one another in eighteenth-century transport?
