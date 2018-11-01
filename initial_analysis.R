@@ -15,9 +15,11 @@
 # Load necessary packages
 library(tidyverse)
 library(magrittr)
+library(DBI)
 library(RMySQL)
 
 # Establish connection to database
+# NB: You must have a local MySQL/MariaDB server running for the script to connect to
 manuscripts <- dbConnect(MySQL(), user="root", dbname="manuscripts", host="localhost")
 info_schema <- dbConnect(MySQL(), user="root", dbname="information_schema", host="localhost")
 
@@ -59,5 +61,17 @@ papermakers <- clients %>%
 
 # Export as csv for use in other programs.
 write_csv(papermakers, "data/papermakers_with_places.csv")
+
+# Find clients who were *only* papermakers.
+only_papermakers <- clients_professions %>%
+  group_by(client_code) %>% # group into professions
+  filter(n() == 1) %>% # keep those with only one profession
+  ungroup() %>%
+  filter(profession_code == "pf171") %>% # only keep papermakers
+  left_join(clients, by = "client_code") %>% # import the rest of the client data about these people
+  left_join(clients_places, by = "client_code") %>% # link to place data
+  left_join(placenames, by = "place_code") %>%
+  mutate(other_documents = number_of_documents - number_of_letters) %T>% # to avoid confusion, calculate number of non-letter documents
+  write_csv("data/papermakers_only_one_profession.csv")
 
 ## END
