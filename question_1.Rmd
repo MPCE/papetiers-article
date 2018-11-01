@@ -90,6 +90,33 @@ papermakers %>%
   geom_histogram(binwidth = 20)
 ```
 
+## What about clients who were *only* papermakers?
+
+Many of these papermakers, including the one with the most letters, M. Charmet of Besancon, were not only papetiers but also sold books or had other business relationships with the STN. How does the picture look if we exclude them from the picture?
+```{r message=FALSE}
+only_papermakers <- read_csv("data/papermakers_only_one_profession.csv")
+only_papermakers %>%
+  arrange(desc(number_of_documents))
+```
+
+That knocks out eight clients. Now how does the `documents`/`distance` curve look?
+```{r}
+only_papermakers %>%
+  ggplot(aes(number_of_documents, distance_from_neuchatel)) +
+  geom_point() +
+  labs(
+    x = "Number of documents in STN archive",
+    y = "Distance from Neuchatel (km)",
+    title = "Where the sole papetiers were"
+  )
+```
+
+```{r message=FALSE}
+stats2 <- cor.test(only_papermakers$number_of_documents, only_papermakers$distance_from_neuchatel, alternative = "less", method = "spearman")
+```
+
+Knocking out the papetiers with other professions does not seem to have changed the graph. Excluding these others has not altered the distribution of the data statisically. Spearman's rho is `r stats2$estimate`, with a p-value of `r stats2$p.value`.
+
 ## Questions
 
 The most obvious question that arises from this first analysis is: what was so special about Besancon and Lyon? Was Lyon's highly developed textiles industry a good source of rags, the raw material of eighteenth-century paper? Could we perhaps correlate these patterns with the population size of different centres? Is our current measurement of 'distance from Neuchatel', kilometres as the crow flies, a useful metric at all? Can we find out how far these places were from one another in eighteenth-century transport?
