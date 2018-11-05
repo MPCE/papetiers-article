@@ -1,0 +1,399 @@
+---
+title: 'Question 2: Book formats and number of sheets over time'
+output:
+  html_document:
+    df_print: paged
+---
+
+Authors: Michael Falk, Rachel Hendery, Katie McDonough
+
+# The questions
+
+In order to study the STN's use of paper, it is useful to know how many books of what kind they were producing at any given time. There are two main questions we'd like to try and answer:
+
+* How much paper was going into the STN's books in any given year?
+* Did the mixture of different formats change over time?
+
+To get started, the cell below loads the necessary libraries for this notebook.
+
+```{r message=FALSE}
+library(DBI)
+library(RMySQL)
+library(tidyverse)
+library(magrittr)
+library(scales)
+```
+
+
+# The data
+
+The data we have to draw on comes from the STN's account books. We have a catalogue of all the books they produced between 1770 and 1794. And we have a comprehensive archive of all their sales through this period. (There's plenty of other data too, but this is what is relevant to the questions of this notebook.)
+
+To get started, we can load the catalogue of books.
+
+```{r, message=FALSE, warning=FALSE}
+# Create connection object
+manuscripts <- dbConnect(MySQL(), user="root", dbname="manuscripts", host="localhost")
+
+# Import editions table
+editions <- manuscripts %>%
+  dbSendQuery("SELECT * FROM books") %>%
+  fetch(n = Inf) %>%
+  as_tibble()
+```
+
+Let's have a look at the data:
+
+```{r}
+editions
+```
+
+
+Since we want to know how much paper the STN was using, we are only interested in the books they actually produced during this period. There are several thousand books in the catalogue, because the STN also dealt in other people's books. The next cell filters out the rows of `editions` that we want. 
+
+```{r}
+# The editions have all been categorised. Three of these categories entail that the STN actually manufactured the book.
+stn_edition_types <- c("STN editions", "Livres en Société: STN joint editions", "Commissioned STN edition")
+
+stn_editions <- editions %>%
+  filter(edition_type %in% stn_edition_types)
+```
+
+Now we have a data frame (actually a `tibble`) of the books the STN produced during the study period. They apparently published `r nrow(stn_editions)` different `editions` of various books during the study period.
+
+## How many sheets of paper were used to make each book?
+
+Because [book size](https://en.wikipedia.org/wiki/Book_size) was so standardised in the eighteenth century, this is actually a simple question conceptually. Books were nearly always made from sheets of the standard 'folio' size, which were then folded 1, 2, 4 or 6 times, to produce the four most common sizes of book. Book formats were defined by the number of leaves into which the sheet was divided. If the sheet was folded once, this would prouduce 2 'leaves', each of which could be printed on both sides to produce 4 pages of text. This is a 'folio' or 'in-2' edition. Similarly, a 'quarto' edition was folded twice to produce *4* leaves, an 'octavo' eidiotn was folded 4 times to produce *8* leaves, and a duodecimo edition was folded 6 times to produce *12* leaves. In the STN data, the number of leaves and the total pages have been recorded for every `edition` where the information was available. We shoudl therefore be able to calculate the number of sheets of paper required to fabricate each edition using the following formula:
+
+$$ sheets = \lceil \frac{pages} {2 \times leaves} \rceil $$
+
+The '$\lceil$' and '$\rceil$' symbols indicate that the result should be rounded up to the nearest whole number, since generally speaking only whole sheets could be used, not part sheets. If we had a quarto edition of 175 pages, we could apply the fomula to find that it required $\lceil 175 \div (2 \times 4) \rceil = \lceil 29\frac{1}{6} \rceil = 30$ sheets for its manufacture.
+
+This calculation may not be wholly accurate for all the books in the data, because some were in multiple volumes and the pages may be concatenated by our approach. This is not a big problem, however, because it would only result in our sheet estimates being 1 or possibly 2 sheets too low for any given book. The multi-volume books in question comprise dozens or even hundreds of sheets, so this difference really is negligible. 
+
+The next cell defines a function for extracting the number of pages from the page number data in the database. Unfortunately the page number data has been stored as a string, and some of the numbers are expressed in roman numerals. We need to massage this data using regular expressions to get the numbers we need.
+
+You can see a random record as an example:
+```{r}
+stn_editions %>% select(pages) %>% drop_na() %>% sample_n(1) %>% as.character()
+```
+
+The next cell defines a function, `sum_pages`, that will examine string like the one above, extract any numbers (whether hindu-arabic or roman), and then sum them together to calculate the total number of pages for a given `edition`.
+
+```{r}
+sum_pages <- function(pages) {
+  #############
+  #
+  # Given a character vector of page number information, this finds any Roman or
+  # Hindu-Arabic numerals and sums them.
+  #
+  # depends:
+  #   stringr (part of the tidyverse)
+  #
+  # params:
+  #   pages: a character vector
+  #
+  # returns:
+  #   num_pages: the total pages
+  #
+  #############
+  
+  require(stringr)
+  
+  # Search for roman numerals
+  rom_reg <- regex("
+                  (?<!b)    # do not find a match if there is a 'b' in front ('bl.' = 'blank')
+                  [ivxlcdm]+  # look for any number of the roman numerals
+                   ", comments = T,
+                   ignore_case = T)
+  roman <- str_match_all(pages, rom_reg)
+  
+  # roman is a list with a column vector of strings for each book
+  roman <- lapply(roman, as.roman) # interpret all roman numerals using built in R function
+  roman_totals <- sapply(roman, sum) # then sum all the results
+  
+  # now extract hindu-arabic numerals
+  hindu_arabic <- str_match_all(pages, "\\d+")
+  hindu_arabic_totals <- sapply(hindu_arabic, function(x) sum(as.numeric(x)))
+  
+  # add these two amounts to get the total pages for each book
+  num_pages <- roman_totals + hindu_arabic_totals
+  
+  return(num_pages)
+}
+```
+
+Now that we have defined that helper function, we can apply it to our data to add columns for `total_pages` and `total_sheets`. The number of folds for each edition is stored in the `edition` column. Below the following cell you can examine 5 random examples of the results.
+
+```{r}
+stn_editions %<>%
+  mutate(
+    # First let's get the format of each book as a number:
+    edition = str_replace(edition, "Folio", "2"), # replace the word 'folio' with the number of leaves
+    edition = as.integer(edition),
+    # Next let's get the total pages according to the 'pages' column (which seems to be the most accurate)
+    total_pages = sum_pages(pages),
+    # Now let's estimate the number of sheets according to the total_pages and the format
+    # NB: this is the total number of sheets across all volumes of the book
+    total_sheets = total_pages / (2 * edition),
+    # This should be rounded up to the nearest whole number, on the assumption that parts of sheets were not reused.
+    total_sheets = ceiling(total_sheets)
+  )
+
+stn_editions %>%
+  select(book_code, pages, edition, total_pages, total_sheets, full_book_title) %>%
+  sample_n(5)
+```
+
+## How many books did the STN produce?
+
+We do not have any direct figures for how many books the STN produced in a given year. Instead, what we know is how many books they were selling or receiving at any particular moment in time. The following cell imports the transaction data from the database. Each `order` in the database is a single event in time, which comprises many `transactions`, or exchanges of particular titles. To estimate how many books the STN were producing, we will focus only on `out` transactions of their own `editions`. To work out how many sheets of paper were required to meet each order, we can multiply the number of copies sold by the number of sheets required to produce each copy.
+
+NB: The transaction data actually gives the `number_of_volumes`, not the number of copies sold. So a sale of 300 volumes of a 3-volume work would correspond to a sale of 100 copies of that `edition`. We do have some fine-grained data on which particular volumes were traded, but it may not be worth the effort to calculate how many sheets each volume of each edition contained or to make the necessary data join. This is because, as noted above, the page numbers per volume are currently stored as unstructured data.
+
+```{r, message=FALSE, warning=FALSE}
+orders <- manuscripts %>%
+  dbSendQuery("SELECT * FROM orders") %>%
+  fetch(n = Inf) %>%
+  as_tibble()
+
+transactions <- manuscripts %>%
+  dbSendQuery("SELECT * FROM transactions") %>%
+  fetch(n = Inf) %>%
+  as_tibble() %>%
+  filter(str_detect(direction_of_transaction, regex("out", ignore_case = T))) %>% # only want books sent out/sold.
+  rename(num_vols_exchanged = total_number_of_volumes) %>% # rename this confusing column
+  mutate(num_vols_exchanged = abs(num_vols_exchanged)) %>% # all out transactions are negative numbers
+  right_join(orders, by = "order_code") %>% # add order time (time, location etc. of transaction)
+  mutate(order_year = as.numeric(str_extract(date, "\\d{4}"))) %>% # extract year of order from date column
+  right_join(stn_editions, by = "book_code") %>% # add book information to the transaction data. The right join drops rows for non-STN editions.
+  mutate(sheets_needed = num_vols_exchanged / number_of_volumes * total_sheets) %>% # calculate total sheets for each transaction
+  select(transaction_code, book_code, full_book_title, total_pages, edition, total_sheets, number_of_volumes, num_vols_exchanged, sheets_needed, everything()) # reorder columns
+
+```
+
+Now we have all the data we need to assess the STN's paper usage in the study period.
+
+# Discussion
+
+## How many sheets did they use per year?
+
+We can estimate the number of sheets used per year by summing all the orders for each year:
+
+```{r}
+yearly_data <- transactions %>%
+  group_by(order_year) %>%
+  summarise(sheets_needed = sum(sheets_needed, na.rm = T)) %>%
+  drop_na()
+
+yearly_data
+```
+
+It is convenient to visualise this data in a line graph:
+
+```{r}
+yearly_data %>%
+  ggplot(aes(order_year, sheets_needed)) +
+  geom_line() +
+  scale_x_continuous(breaks = seq(1770, 1794, by = 4)) +
+  labs(
+    x = "Year",
+    y = "Total sheets of all books sold",
+    title = "Paper requirements peaked in the early 1780s"
+  )
+```
+
+From 1770 until the eve of the French Revolution, the STN required on average `r yearly_data %>% filter(order_year < 1788) %>% summarise(sheets_needed = mean(sheets_needed)) %>% as.integer() %>% format(scientific=F)` sheets of paper each year to meet its demand for books. From 1788 onwards, the demand suddenly dropped, and mean paper requirements were only `r yearly_data %>% filter(order_year >= 1788) %>% summarise(sheets_needed = mean(sheets_needed)) %>% as.integer() %>% format(scientific=F)` sheets per year on average.
+
+## How reliable are these estimates?
+
+The data is not perfect. 'Out' transactions are only a proxy for the number of book the STN actually produced, and books produced is only a proxy for the amount of paper they would actually need. A book may be produced, and then remaindered, and the paper could conceivably be pulped and reused for a later edition.
+
+A bigger problem is that we do not know the format of all the STN's editions, so the above graph only displays a subset of the data. Of the `r nrow(stn_editions)` editions in the dataset, we know the format of `r stn_editions %>% filter(!is.na(total_sheets)) %>% nrow()`, or `r stn_editions %>% filter(!is.na(total_sheets)) %>% nrow() %>% (function(x) x / nrow(stn_editions) * 100) %>% round(digits = 2)`% of them. Of course, different editions sold in different amounts, so this lack of information may or may not be a serious problem. Looking at the transaction data, we can see that of the `r sum(transactions$num_vols_exchanged, na.rm = T)` volumes sold in the period, we know the format of `r filter(transactions, !is.na(total_sheets)) %>% summarise(num_vols_exchanged = sum(num_vols_exchanged, na.rm = T)) %>% as.integer()`, or `r filter(transactions, !is.na(total_sheets)) %>% summarise(num_vols_exchanged = sum(num_vols_exchanged, na.rm = T)) %>% as.integer() %>% (function(x) x / sum(transactions$num_vols_exchanged, na.rm = T) * 100)() %>% round(digits = 2)`%.
+
+How do we deal with the 30% of missing data? Can we make an educated guess as to how many sheets these 30 titles required?
+
+```{r}
+stn_editions %>% filter(is.na(total_sheets))
+```
+
+For `r stn_editions %>% filter(is.na(total_sheets) & !is.na(book_sheets)) %>% nrow()` of these `r stn_editions %>% filter(is.na(total_sheets)) %>% nrow()` titles without sufficient page or format data, we have a manually entered sheets estimate in the `book_sheets` column. One partial solution would be to incorporate this data into our estimates. Another option would be to assume that these `r stn_editions %>% filter(is.na(total_sheets)) %>% nrow()` titles come from the same distribution as the others. That is to say, we could assume that these titles were published in a simlar mixture of formats and had a similar number of pages on average to the rest of the titles in the data.
+
+I believe that the unknown books come from the same distribution as the known books. That is, we can assume for the sake of our estimates the the 61 unknown books had similar formats, similar page numbers, and similar sales figures to the other books. This is because there is a correlation in the data between the number of volume traded and the number of sheets required. This is true even though we know the number of volumes traded for all but `r transactions %>% filter(is.na(num_vols_exchanged)) %>% nrow()` of the `r nrow(transactions)` sales in the data.
+
+```{r}
+sheets_v_volumes <- transactions %>%
+  group_by(order_year) %>%
+  summarise(sheets_needed = sum(sheets_needed, na.rm = T),
+            num_vols_exchanged = sum(num_vols_exchanged, na.rm = T)) %>%
+  drop_na() %>%
+  mutate_at(2:3, log) # convert to log scale
+
+# There is an extremely strong correlation:
+sheet_vol_cor <- cor.test(sheets_v_volumes$sheets_needed, sheets_v_volumes$num_vols_exchanged, method = "pearson", alternative = "greater")
+```
+
+This test find a Pearson's product-moment correlation coefficient of `r sheet_vol_cor$estimate` with a p-value < `r sheet_vol_cor$p.value %>% signif(1)`. I have calculated the correlation coefficient on the log scale, because it is at this scale the the data appears to be normally distributed (which is a precondition for Pearson's coefficient to adequately capture the variation in the data). See the cell and graph below.
+
+```{r}
+transactions %>%
+  select(sheets_needed, num_vols_exchanged) %>%
+  mutate_all(log) %>%
+  gather(metric, score) %>%
+  drop_na() %>%
+  ggplot(aes(score)) +
+  facet_wrap(~metric) +
+  geom_histogram(bins = 40) +
+  labs(
+    title = "The two distributions are roughly normal on the log scale.",
+    subtitle = "Number of volumes exchanged and sheets needed per transaction.",
+    x = "Natural logarithm of volumes (left) or sheets (right)"
+  )
+```
+
+The correlation is evident on the below scatterplot, which is again shown at the log scale:
+
+```{r}
+# This is obvious from the graph:
+model <- lm(sheets_v_volumes$sheets_needed ~ sheets_v_volumes$num_vols_exchanged)
+sheets_v_volumes %>%
+  ggplot(aes(num_vols_exchanged, sheets_needed)) +
+  geom_point() +
+  geom_abline(intercept = model$coefficients[1], slope =  model$coefficients[2], colour = "red") +
+  labs(
+    title = paste0(
+      "There is an extremely strong correlation between\n",
+      "the number of volumes actually exchanged and the estimated\n",
+      "number of sheets required. (p << 0.001)"
+    ),
+    x = "Log(number of volumes exchanged)",
+    y = "Log(sheets required)"
+  )
+```
+
+The final piece of the puzzle is the coefficient of determination. For the model displayed in the above graph, the coefficient of determination is `r summary(model)$r.squared`. What this implies is that `r summary(model)$r.squared %>% (function(x) round(x * 100, digits = 0))()`% of the variation in `sheets_needed` can be accounted for simply by looking at `num_vols_exchanged`.
+
+From a mathematical perspective, this correlation does not allow us to guess how many sheets were needed to manufacture the `r stn_editions %>% filter(is.na(total_sheets)) %>% nrow()` books whose format we do not know in any given year. But it *does* allow us to make two other claims: (1) that demand for the `r stn_editions %>% filter(is.na(total_sheets)) %>% nrow()` known books moved up and down at roughly the same rate as demand for the `r stn_editions %>% filter(is.na(total_sheets)) %>% nrow()` unknown books; and (2) among the konwn books, the mixture of formats and page numbers stays more-or-less the same across time. If either (1) or (2) was untrue, then we would be very unlikely to this this strong correlation between volumes traded and sheets needed to create the known books. If (1) was untrue, this would means that sales of the `r stn_editions %>% filter(is.na(total_sheets)) %>% nrow()` unknown books would be increasing or decreasing significantly without affecting sales of the `r stn_editions %>% filter(!is.na(total_sheets)) %>% nrow()` known books. If (2) were untrue, then the number of sheets needed would jump around by comparison with the total number of volumes traded. In either of these cases, it would be very unlikely to be able to predict `r summary(model)$r.squared %>% (function(x) round(x * 100, digits = 0))()`% of the sheets needed merely by looking at the number of volumes traded.
+
+Thus statistical analysis suggests that the trends we have observed are actually true. We can safely argue that paper needs increased in the 1780s and fell in the wake of the French Revolution.
+
+From a broader economic and historial perspective, it seems reasonable to make another generalisation, and to argue that the unknown books required a similar amount of paper to make as the known books. This is because the cost of books varied according to their format in this period. Moreover, books were a highly-traded commoditiy and generally speaking a luxury item. Demand for them was therefore probably elastic to price. Therefore, if the format varied, so did the price, and if the price varied, so did the demand. (We could do some research to test this theory.) Another way of putting this is that the demand for books depended on their size and format. Now the books whose format we do know traded in a similar mixture of formats from year to year. This suggests that the market wanted a similar mixture of books even if their demand for books overall rose or fell. Meanwhile, the demand for the `r stn_editions %>% filter(is.na(total_sheets)) %>% nrow()` books whose format we don't know rose and fell along with the demand for the known books. If the demand for them moved up and down in the same way, and the market tended to want the same mixture of formats year-on-year, it stands to reason that the unknown books were published in a similar range of formats and prices to the rest of the books.
+
+If my hypothesis is correct, then we can update our estimate of the number of sheets required each year by estimating the average requirements for the unknown books. To do this, we can simply divide `total_sheets_required` by the percentage of titles whose sheet requirements we know for that year.
+
+The following cell calculates the percentage of volumes for which we know the number of sheets for each year. As can bee seen from the table, there are several years where our knowledge is quite incomplete.
+
+```{r}
+num_known <- transactions %>%
+  mutate(sheets_known = !is.na(total_sheets),
+         known_vols = num_vols_exchanged * sheets_known) %>%
+  group_by(order_year) %>%
+  summarise(known_vols = sum(known_vols, na.rm = T)/sum(num_vols_exchanged, na.rm = T)) %>%
+  drop_na()
+
+num_known
+```
+
+The following cell revises our estimates of the sheets required according to the method I have described.
+
+```{r}
+yearly_data %<>%
+  left_join(num_known) %>%
+  mutate(revised = sheets_needed / known_vols)
+
+yearly_data
+
+yearly_data %>%
+  select(-known_vols) %>%
+  gather(metric, measure, -order_year) %>%
+  ggplot(aes(order_year, measure, color = metric)) +
+  geom_line() +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(breaks = seq(1770, 1794, by = 4)) +
+  scale_color_discrete(labels = c("Revised estimate", "Raw estimate")) +
+  labs(
+    title = "Sheets needed per year, raw vs. revised",
+    x = "Year",
+    y = "Required number of sheets",
+    colour = "Legend"
+  )
+```
+
+## Did the format of the books sold vary year on year?
+
+The above statistical analysis suggests that the overall mixture of different formats did not vary considerably year-on-year. Generally speaking, the same number of sheets was required in order to produce a given number of volumes. But this does not necessarily mean that the STN produced exactly the same ratio of folios to quartos to octavos every year. Perhaps the demand for different formats were linked to one another, so that a year where more quartos were sold would be a year when less octavos were sold, because there was a fixed overall demand the roughly corresponded to the number of sheets.
+
+```{r}
+# Or a faceted lined graph
+format_labeller = as_labeller(c(
+  "2" = "2 (folio)",
+  "4" = "4 (quarto)",
+  "8" = "8 (octavo)",
+  "12" = "12 (duodecimo)"
+  ))
+
+transactions %>%
+  filter(!is.na(edition)) %>%
+  group_by(order_year, edition) %>%
+  summarise(num_vols_exchanged = sum(num_vols_exchanged)) %>%
+  ggplot(aes(order_year, num_vols_exchanged)) +
+  facet_wrap(~edition, scales = "free_y", labeller = format_labeller) +
+  scale_x_continuous(breaks = seq(1770, 1794, by = 4)) +
+  geom_line() +
+  labs(
+    title = "Demand for all formats except folio peaked in the late 70s or early 80s",
+    subtitle = "Number of volumes exchaged by number of leaves (NB: y axes on different scales)"
+  )
+```
+
+The cell below tries a different kind of visualisation:
+
+```{r}
+transactions %>%
+  mutate(order_year = cut(order_year, 5, labels = c("1770-74", "1775-79", "1780-1784", "1785-1789", "1790-94"))) %>% # split data into three-year increments to make it easier to visualise
+  group_by(order_year, edition) %>%
+  summarise(num_vols_exchanged = sum(num_vols_exchanged)) %>%
+  replace_na(list(edition = "Unknown")) %>% # replace NAs in edition column
+  drop_na() %>% # drop the rows with missing years
+  ggplot(aes(order_year, num_vols_exchanged, fill = as.character(edition))) +
+  geom_col(position = "dodge") +
+  scale_fill_discrete(labels = c(
+  "2 (folio)",
+  "4 (quarto)",
+  "8 (octavo)",
+  "12 (duodecimo)",
+  "Unknown"
+  )) +
+  labs(
+    title = "Demand for all formats except folio appears to have peaked\nin the early 1780s.",
+    x = "Year",
+    y = "Number of volumes sold",
+    fill = "Format"
+  )
+```
+
+
+## What happened in 1782?
+
+The most obvious feature of the data is the big spike in sales in 1782. We can see the main reason for the spike in paper consumption if we examine the bestsellers for that year:
+
+```{r}
+transactions %>%
+  filter(order_year == 1782) %>%
+  group_by(book_code, full_book_title, edition) %>%
+  summarise(num_vols_exchanged = sum(num_vols_exchanged, na.rm = T),
+            sheets_needed = sum(sheets_needed, na.rm = T)) %>%
+  arrange(desc(sheets_needed)) %>%
+  select(book_code, edition, num_vols_exchanged, sheets_needed, full_book_title)
+```
+
+Clearly the ~800000 sheets required for the 36000 volumes of *Tableau de Paris* had an enormous impact on the overall picture for 1782. 
+
+# Conclusion and Questions
+
+During the study period, it seems that demand for paper and for different formats of book fluctuated. Our data is of high enough quality to make strong claims about when the STN was ordering in more or less paper, and what sort of books they were turning it into.
+
+This analysis suggests further lines of enquiry:
+
+* What was the time lag between production and sale at the STN? We know when the books were being sent from the warehouse, but do we know how long they were sitting there before they went? Unfortunately our data cannot help answer this question.
+* How do these fluctuations in the STN's use of data correlate with fluctuations in the European economy? Two obvious drivers would be demand for books and the supply of paper. Can we find anything out about these, to compare our own data to?
