@@ -1,0 +1,351 @@
+---
+title: "Different evidence of paper demand"
+author: Michael Falk
+date: March 18-19, 2019
+output:
+  html_document:
+    df_print: kable
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    number_sections: true
+    theme: readable
+---
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(kableExtra)
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+# Introduction
+
+The STN database records several types of 'transaction', which have a bearing on the STN's demand for paper. In previous analyses, I have focussed on particular 'out' transactions (broadly speaking, sales). By seeing how many books the STN were selling, I tried to give a sense of how many sheets of paper they were using. It turns out, however, that there are two kinds of 'in' transaction in the database, of particular relevance to our research: 'in (printing)' and 'in (assumed printing)' transactions record print runs; 'Bilan' and 'stock take' transactions record stock sitting in the STN's warehouse at particular points in time
+
+By comparing these three, independent lines of data, hopefully we can get a clearer idea of how much paper the STN was bringing in, how much they were using, and how much they were wasting.
+
+```{r message=FALSE}
+# Connect to the database and load functions and packages
+source('init.R')
+
+# Import key data
+orders <- fetch_table(stn, "orders") # Each transaction is part of an overarching 'order'
+editions <- fetch_table(stn, "books") %>%
+  # Estimate the sheets using the 'edition' and 'pages' info
+  mutate(
+    book_sheets = str_remove(book_sheets, "\\D") %>% as.numeric(),
+    total_pages = sum_pages(pages),
+    leaves = str_replace(edition, "[Ff]olio", "2") %>% str_remove("\\D") %>% as.numeric(),
+    sheets_estimate = calculate_sheets(total_pages, leaves)
+  ) # Each transaction concerns a particular edition
+transactions <- fetch_table(stn, "transactions") %>% # Load transaction data
+  left_join(orders, by = "order_code") %>% # Join to order information (e.g. to get dates)
+  left_join(editions, by = "book_code") # Joine to edition information (e.g. to get format details)
+```
+
+# The big picture: kinds of transaction
+
+We do not know how comprehensive the data is, or how these different pieces fit together. The simplest thing to do is to see how many volumes are recorded for each book in each category of transaction, and see if the books balance.
+
+The basic accounting unit in the database is 'volumes exchanged'. So to begin, let's see how many volumes were exchanged for each unique transaction type:
+
+```{r}
+transactions %>%
+  group_by(direction_of_transaction) %>%
+  summarise(
+    volumes_exchanged = sum(total_number_of_volumes, na.rm = T),
+    na_transactions = sum(is.na(total_number_of_volumes))
+  ) %>%
+  kable() %>%
+  kable_styling(full_width = F, fixed_thead = T) %>%
+  scroll_box(height = '300px')
+```
+
+There are many types of transaction, and it is not clear from the FBTEE documentation what they all represent. Let us just focus on the ones specifically labelled 'In' and 'Out', and see how the totals compare.
+
+```{r}
+transactions %>%
+  mutate(direction_of_transaction = str_to_lower(direction_of_transaction)) %>%
+  filter(str_detect(direction_of_transaction, "^in|^out")) %>%
+  mutate(
+    direction = !str_detect(direction_of_transaction, "^in"),
+    direction = map_chr(direction, function(x) {if (x) {return("Out")} else {return("In")}})
+    ) %>%
+  group_by(direction) %>%
+  summarise(vols_exchanged = sum(total_number_of_volumes, na.rm = T)) %>%
+  kable() %>%
+  kable_styling(full_width = F)
+```
+
+The account doesn't quite balance. How does it look if we examine only the STN editions?
+
+```{r}
+transactions %>%
+  mutate(direction_of_transaction = str_to_lower(direction_of_transaction)) %>%
+  filter(
+    str_detect(direction_of_transaction, "^in|^out"), # Only ins and outs
+    str_detect(edition_type, "(?<=^|\\s)STN") # only STN editions
+    ) %>%
+  mutate(
+    direction = !str_detect(direction_of_transaction, "^in"),
+    direction = map_chr(direction, function(x) {if (x) {return("Out")} else {return("In")}})
+    ) %>%
+  group_by(direction) %>%
+  summarise(vols_exchanged = sum(total_number_of_volumes, na.rm = T)) %>%
+  kable() %>%
+  kable_styling(full_width = F)
+```
+
+What about these stocktakes? How are we to account for them? Probably the best way to look at them is to chart them over time, so we can see the warehoused stock rise and fall, and get a sense of how the stocktakes fit in with the rest of the data.
+
+```{r}
+transactions %>%
+  mutate(direction_of_transaction = str_to_lower(direction_of_transaction)) %>%
+  # exclude all 'in' and 'out' transactions
+  filter(!str_detect(direction_of_transaction, "^in|^out")) %>% 
+  mutate(year = lubridate::ymd(date) %>% lubridate::year()) %>%
+  ggplot(aes(x = year, y = total_number_of_volumes, fill = direction_of_transaction)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::comma_format()) +
+  labs(
+    title = 'Other transactions in the STN data',
+    x = 'Year',
+    y = 'Number of volumes',
+    fill = 'Transaction type'
+  ) +
+  theme_bw()
+```
+
+What is 'sales ms1003?' It is not clear why they have been coded differently to other 'out' transactions. MS1003 was a different kind of document, and SB thinks it may have been coded to allow comparison with the conventionally recorded sales. One thing to check is whether any of the MS1003 sales double up on other 'out' transactions.
+
+```{r}
+transactions %>%
+  # Floor to the nearest month
+  mutate(year_month = lubridate::ymd(date) %>% lubridate::floor_date(unit = "month")) %>%
+  group_by(super_book_code.x, year_month) %>%
+  filter(
+    any(direction_of_transaction == "sales MS1003"),
+    any(str_detect(direction_of_transaction, "^[Oo]ut"))
+    ) %>%
+  ungroup() %>%
+  select(transaction_code, date, book_code, stn_abbreviated_title, total_number_of_volumes, client_code) %>%
+  kable() %>%
+  kable_styling()
+```
+
+The above script calls up all the `super_books` that have at least one 'out' transaction and one 'ms1003 sale' in the same month. As you can see, there is only `r transactions %>% mutate(year_month = lubridate::ymd(date) %>% lubridate::floor_date(unit = "month")) %>% group_by(super_book_code.x, year_month) %>% filter(any(direction_of_transaction == "sales MS1003"), any(str_detect(direction_of_transaction, "^[Oo]ut"))) %>% ungroup() %>% distinct(super_book_code.x) %>% nrow()` such `super_book` in the whole database, and it is pretty clear that the 'ms1003 sale' is not simply a duplicate of any of the other three. We could also just check by day...
+
+```{r}
+transactions %>%
+  group_by(date) %>%
+  filter(
+    any(direction_of_transaction == "sale MS1003"),
+    any(str_detect(direction_of_transaction, "^[Oo]ut"))
+  ) %>%
+  nrow() %>%
+  paste0(., " rows returned!") %>%
+  print()
+```
+
+Nope! There are `r transactions %>% group_by(date) %>% filter(any(direction_of_transaction == "sale MS1003"), any(str_detect(direction_of_transaction, "^[Oo]ut"))) %>% nrow()` 'ms1003 sales' that occur on the same day as an 'out'.
+
+# Checking our sheets estimates against the manually entered `book_sheets` data
+
+In discussion of our previous analysis, SB has asked whether we can check the accuracy of our sheets estimates against the manually-entered data. The STN often used sheets of paper as their accounting unit. The manually entered data, where it is drawn directly from the STN's books, will therefore give a ground-truth value against which our estimates can be compared.
+
+The sheets were estimated above, when the data was imported.
+
+There are many NA values:
+```{r}
+editions %>%
+  mutate(na = is.na(sheets_estimate) | is.na(book_sheets)) %>%
+  group_by(na) %>%
+  summarise(n = n()) %>%
+  kable() %>%
+  kable_styling(full_width = F)
+```
+
+In other words, there are only `r editions %>% mutate(book_sheets = as.numeric(book_sheets), na = is.na(sheets_estimate) | is.na(book_sheets)) %>% group_by(na) %>% summarise(n = n()) %>% filter(na == F) %>% pull(n)` cases where we can directly compare the estimated sheets to the manually entered value.
+
+The first question is how well our `sum_pages()` function is working to estimate the number of pages. We can have a look by comparing it to the `pages` and `quick_pages` columns of the `editions` table. The `quick_pages` column *does not* count blank pages, so we should expect our `total_pages` to differ by 1-3 pages from the `quick_pages`. Let's just look at rows where there is a greater difference than 3:
+
+```{r}
+editions %>%
+  mutate(diff = total_pages - as.numeric(quick_pages)) %>%
+  filter(abs(diff) > 3) %>%
+  arrange(desc(abs(diff))) %>%
+  select(book_code, pages, quick_pages, total_pages) %>%
+  kable() %>%
+  kable_styling() %>%
+  column_spec(2, width = "25%") %>%
+  scroll_box(height = '400px')
+```
+
+In all cases the `total_pages` estimate seems to be better than the `quick_pages`, with the exception of `bk0000869`, where either hyphens have been used improperly in the `pages` field, or the `quick_pages` is significantly off.
+
+Now we can be confident that the `total_pages` estimate is solid, we can examine the `sheets_estimate`. As a quick reminder, the formula used to estimate the number of sheets is: $$ sheets = \lceil \frac{pages} {2 \times leaves} \rceil $$ where $leaves$ is the number of leaves each sheets is divided into (e.g. $2$ for a folio edition or $8$ for an octavo), and the $\lceil$ and $\rceil$ symbols indicate that we should round the result up to the nearest whole number, since any excess leaves from the sheet would generally have to be incorporated into the book as blank pages or otherwise wasted.
+
+The table below shows all the books for which we have both a `sheets_estimate` calculated according to the formula, and a `book_sheets` value entered manually into the STN database.
+```{r}
+editions %>%
+  filter(!is.na(sheets_estimate), !is.na(book_sheets)) %>%
+  mutate(difference = sheets_estimate - book_sheets) %>%
+  select(book_code, edition_type, full_book_title, pages, total_pages, edition, book_sheets, sheets_estimate) %>%
+  kable() %>%
+  kable_styling() %>%
+  column_spec(3, width = "10em") %>%
+  scroll_box(height = '400px')
+```
+
+There's a problem, because the `book_sheets` column does not appear to record the sheets required to manufacture a single copy. There is no way, for example, that `bk0001477`, a book of `r filter(editions, book_code == 'bk0001477') %>% pull(total_pages)` pages, required `r filter(editions, book_code == 'bk0001477') %>% pull(book_sheets)` sheets to make a single copy. This must be the amount required for printing the whole edition. On the other hand, some of the books *do* simply record the sheets required for a single copy. For example, `bk0002338` has a `book_sheets` value of `r filter(editions, book_code == 'bk0002338') %>% pull(book_sheets)`, which is identical to my calculated `sheets_estimate` of `r filter(editions, book_code == 'bk0002338') %>% pull(sheets_estimate)`.
+
+Can we take account of the print run data, and see if the `book_sheets` column makes sense then? If we divide the `book_sheets` by the number of copies printed, do we find the correct number of sheets for each copy?
+
+**NB:** Since the unit of accounting is $volumes$ sold/printed etc., the formula is actually $$sheets\_per\_copy = \frac{book\_sheets}{volumes \times volumes\_printed}$$, where $volumes$ is the number of volumes in a multi-volume work, e.g. $3$ for a triple-decker novel like *Pride & Prejudice*.
+```{r}
+transactions %>%
+  filter(str_detect(direction_of_transaction, "printing")) %>%
+  group_by(book_code) %>%
+  summarise(total_vols_moved = sum(total_number_of_volumes, na.rm = T)) %>%
+  left_join(editions, by = "book_code") %>%
+  mutate(
+    sheets_per_copy = book_sheets / number_of_volumes / total_vols_moved
+  ) %>%
+  select(book_code, total_pages, book_sheets, sheets_estimate, sheets_per_copy) %>%
+  drop_na() %>%
+  kable() %>%
+  kable_styling(full_width = F) %>%
+  scroll_box(height = '400px')
+```
+
+None of these numbers match up. If the `book_sheets` described the number of sheets needed to produce a whole edition, then we would expect the `sheets_per_copy` to be roughly equal to `sheets_estimate`. Instead, they are all nonesense figures less than 1.
+
+Moreover, none of the books with very larged `book_sheets` numbers seem to have any print run data. What if we look at all 'in' transactions?
+
+```{r}
+transactions %>%
+  filter(!str_detect(direction_of_transaction, regex("^out|^in", ignore_case = T))) %>%
+  group_by(book_code) %>%
+  summarise(total_vols_moved = sum(total_number_of_volumes, na.rm = T)) %>%
+  left_join(editions, by = "book_code") %>%
+  mutate(
+    sheets_per_copy = book_sheets / number_of_volumes / total_vols_moved
+  ) %>%
+  select(book_code, total_pages, book_sheets, sheets_estimate, sheets_per_copy) %>%
+  drop_na() %>%
+  kable() %>%
+  kable_styling(full_width = F) %>%
+  scroll_box(height = '400px')
+```
+
+That produces many absurd and some non-absurd results. But it is still not quite clear what is going on.
+
+How many of the STN editions do we now have some kind of estimate for?
+
+```{r}
+editions %>%
+  filter(str_detect(edition_type, "(?<=^|\\s)STN")) %>%
+  summarise(
+    n = n(),
+    with_manual_sheets = (!is.na(book_sheets)) %>% sum(),
+    with_estimate = (!is.na(sheets_estimate)) %>% sum(),
+    with_neither = (is.na(book_sheets) & is.na(sheets_estimate)) %>% sum(),
+    only_manual = (!is.na(book_sheets) & is.na(sheets_estimate)) %>% sum()
+  )%>%
+  kable() %>%
+  kable_styling(full_width = F)
+```
+
+Of these `r editions %>% filter(str_detect(edition_type, "(?<=^|\\s)STN"), !is.na(book_sheets), is.na(sheets_estimate)) %>% nrow()` books that have only a manually entered `book_sheets` value, how many are trustworthy?
+
+```{r}
+editions %>%
+  filter(
+    str_detect(edition_type, "(?<=^|\\s)STN"),
+    !is.na(book_sheets),
+    is.na(sheets_estimate)
+  ) %>%
+  select(book_code, full_book_title, quick_pages, total_pages, edition, book_sheets) %>%
+  kable() %>%
+  kable_styling(full_width = T) %>%
+  scroll_box(height = '400px')
+```
+
+Initially I thought that the manually entered values would be more accurate, because they were derived directly from the STN's books. Often they recorded stocks in sheets, so we could presume that the number of sheets recorded in their books would closely match the actual number of sheets they were buying and selling. But the `book_sheets` column seems to record many different kinds of data, sometimes recording the number of sheets required for a particular copy, and sometimes recording some other figure whose relationship to our transactions figures is unclear.
+
+Therefore I conclude that we cannot rely on the `book_sheets` data, and should instead use our calculated `sheets_estimate` as the best guess we have of the actual number of sheets required for the editions in the records.
+
+# Comparing print runs, sales and stocktakes.
+
+Following the above analysis, It seems that the print run data is almost there, and we can rely on our calculated sheet estimate more than the data hard-coded into the original STN database.
+
+In a following report, I will go into more detail, but for now, let's just quickly compare how the print run data compares to the sales data over time. Can we see the STN bringing in paper and offloading it?
+
+```{r}
+stn_trans_sheets <- transactions %>%
+  mutate(
+    # Make all number positive
+    total_number_of_volumes = abs(total_number_of_volumes),
+    # Sort the 34 different transaction types into the three main ones
+    transaction_type = case_when(
+      # We are only interesting in print runs among the in transactions
+      str_detect(direction_of_transaction, regex("printing", ignore_case = T)) ~ "in",
+      str_detect(direction_of_transaction, regex("^in", ignore_case = T)) ~ "NA",
+      str_detect(direction_of_transaction, regex("^out", ignore_case = T)) ~ "out",
+      TRUE ~ "neutral"
+    ),
+    # Calculate how many sheets were used for each transaction
+    sheets_used = total_number_of_volumes / number_of_volumes * sheets_estimate,
+    # Infer year data
+    year = lubridate::ymd(date) %>% lubridate::year()
+    ) %>%
+  # Just focus on editions the STN manufactured themselves
+  filter(
+    transaction_type %in% c("in","out"),
+    edition_type %in% c('STN editions', 'Livres en Société: STN joint editions', 'Commissioned STN edition')
+    )
+
+stn_trans_sheets %>%
+  # Sum up by year for each transaction type
+  group_by(transaction_type, year) %>%
+  summarise(sheets_used = sum(sheets_used, na.rm = T)) %>%
+  drop_na() %>%
+  ungroup() %>%
+  ggplot(aes(x = year, y = sheets_used, colour = transaction_type)) +
+  theme_minimal() +
+  scale_colour_discrete(labels = c("in" = "Printing", "out" = "Out transaction")) +
+  scale_y_continuous(labels = scales::comma_format()) +
+  labs(
+    title = "Print runs and out-transactions compared",
+    colour = "Transaction\ntype",
+    y = "Sheets used (estimate)",
+    x = "Year"
+  ) +
+  geom_line()
+```
+
+The new graph does accord with what we might expect. In 1777 and 1779, there are peaks in the demand for paper for printing, followed in 1779 and 1782 with peaks in the sheets actually sold or otherwise sent out from the STN.
+
+Let's just focus on the big spike in 1779 printings, followed by the spike in 1782 sales. Are they for the same books? Can we see a three-year lag here between manufacture and sale?
+
+```{r}
+# Look first at 1779 printings
+stn_trans_sheets %>%
+  filter(transaction_type == "in", year == 1779) %>%
+  group_by(book_code, stn_abbreviated_title) %>%
+  summarise(sheets_used = sum(sheets_used, na.rm = T)) %>%
+  arrange(desc(sheets_used)) %>%
+  kable(caption = "1779 printings") %>%
+  kable_styling(full_width = F) %>%
+  scroll_box(height = '400px')
+
+# Then at the 1882 sales
+stn_trans_sheets %>%
+  filter(transaction_type == "out", year == 1782) %>%
+  group_by(book_code, stn_abbreviated_title) %>%
+  summarise(sheets_used = sum(sheets_used, na.rm = T)) %>%
+  arrange(desc(sheets_used)) %>%
+  kable(caption = "1882 sales and other transfers") %>%
+  kable_styling(full_width = F) %>%
+  scroll_box(height = '400px')
+```
+
+At first glance, there does not appear to be a strong relationship between the 1779 peak in printing, and the 1882 peak in sales. This may repay further investigation, however.

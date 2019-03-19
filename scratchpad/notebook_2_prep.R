@@ -130,6 +130,69 @@ transactions %>%
     title = "Paper requirements peaked in the early 1780s"
   )
 
+# So messy...
+edition_analysis <- transactions %>%
+  mutate(
+    year = coalesce(year, as.integer(order_year)),
+    sheets_known = !is.na(total_sheets), # create mask for books we know the sheets of
+    known_vols = num_vols_exchanged * sheets_known # Calculate number of known vols
+  ) %>% # Use year of sale if year of edition not known
+  group_by(year) %>%
+  summarise(
+    sheets_needed = sum(sheets_needed, na.rm = T), # How many sheets needed for the ones we know the amount of?
+    known_vols = sum(known_vols, na.rm = T)/sum(num_vols_exchanged, na.rm = T) # What percentage of sold volumes do we not know?
+  ) %>%
+  mutate(revised = sheets_needed / known_vols) %>%
+  select(-known_vols) %>%
+  drop_na() %T>%
+  write_excel_csv("data/sheets_by_edition_year.csv")
+
+encyclopedie <- tibble(
+  year = c(1777, 1778, 1779),
+  encyclopedie = c(540000, 2208250, 116000)
+)
+
+
+# Alternative time-scale: by the year the edition was produced (also include revised estimate using below method)
+pdf("data/sheets_by_edition_year.pdf", width = 7, height = 4)
+edition_analysis %>%
+  gather(metric, measure, -year) %>%
+  mutate(measure = measure/1000) %>%
+  print(n = Inf) %>%
+  ggplot(aes(year, measure, colour = metric)) +
+  geom_line() +
+  scale_y_continuous() +
+  scale_colour_discrete(labels = c("Revised\nestimate", "Raw estimate")) +
+  labs(
+    x = "Year produced (or sold, if production year unknown)",
+    y = "Total sheets of all books produced ('000s)",
+    title = "Paper requirements peaked in the late 1770s and early 1780s",
+    colour = "Metric"
+  )
+dev.off()
+
+pdf("data/including_encyl.pdf", width = 7, height = 4)
+edition_analysis %>%
+  left_join(encyclopedie, by = "year") %>%
+  mutate(inc_encyc = (encyclopedie + revised)[encyclopedie != 0]) %>%
+  select(-encyclopedie) %>%
+  gather(metric, measure, -year) %>%
+  mutate(measure = measure / 1000) %>%
+  drop_na() %>%
+  print(n = Inf) %>%
+  ggplot(aes(year, measure, colour = metric)) +
+  geom_line() +
+  scale_y_continuous() +
+  scale_colour_discrete(labels = c("Including\nEncyclopedie", "Revised\nestimate", "Raw estimate")) +
+  labs(
+    x = "Year produced (or sold, if production year unknown)",
+    y = "Total sheets of all books produced ('000s)",
+    title = "Paper requirements peaked in the late 1770s and early 1780s",
+    colour = "Metric"
+  )
+dev.off()
+
+
 # We can verify that these trends represent something real by seeing if the number of sheets correlates to the number of
 # volumes. If so, then we can more confidently assume that the average number of sheets per volume did not alter much
 # year-on-year
@@ -255,3 +318,38 @@ transactions %>%
   ggplot(aes(order_year, num_vols_exchanged)) +
   facet_wrap(~edition) +
   geom_line()
+
+
+# Distribution of number of sheets in each year.
+transactions %>%
+  mutate(books = num_vols_exchanged/number_of_volumes,
+         books = ceiling(books)) %>%
+  filter(!is.na(books)) %>%
+  uncount(books) %>%
+  select(order_year, total_sheets) %>%
+  filter(total_sheets < 100) %>%
+  ggplot(aes(factor(order_year), total_sheets)) +
+  geom_violin()
+
+# Another way ...
+transactions %>%
+  mutate(sheets_per_vol = total_sheets/number_of_volumes) %>%
+  select(order_year, num_vols_exchanged, sheets_per_vol) %>%
+  drop_na() %>%
+  uncount(num_vols_exchanged) %>%
+  group_by(order_year) %>%
+  summarise(median = median(sheets_per_vol)) %>%
+  print(n = Inf)
+  
+
+# How does my estimate of sheets compare to Mark's more accurate assessment?
+stn_editions
+
+# Pages per volume by format:
+stn_editions %>%
+  filter(!is.na(edition) & !is.na(total_pages)) %>%
+  group_by(edition) %>%
+  mutate(ppv = total_pages/number_of_volumes) %>%
+  summarise(ppv_mean = mean(ppv),
+            sheets_mean = mean(total_sheets/number_of_volumes))
+  
