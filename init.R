@@ -71,8 +71,7 @@ sum_pages <- function(pages) {
     sapply(function(x) return(sum(as.numeric(x)) - length(x)))
   rom_deduct_reg <- regex("
                       (?<![abcdefghjknopqrstuwxyz]|e\\.\\s?]) # do not find a match if there are any non-roman letters or an 'e.' (i.e.)
-                      [ivxlcdm]+  # look for any number of the roman numerals
-                      (?![abcdefghjknopqrstuwxyz]|\\.\\s?e) # do not find a match if there are any non-roman letters, an '.e' or a hyphen
+                      [ivxlcdm]+(?=]?-)  # look for any number of the roman numerals followed by a hyphen
                       ", comments = T,
                       ignore_case = T)
   to_deduct_roman <- str_match_all(pages, rom_deduct_reg) %>%

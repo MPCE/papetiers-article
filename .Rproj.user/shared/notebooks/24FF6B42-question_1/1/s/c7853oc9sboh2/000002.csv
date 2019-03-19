@@ -1,5 +1,0 @@
-"0","library(tidyverse, quietly = T)"
-"0","library(magrittr, quietly = T)"
-"0","library(lubridate, quietly = T)"
-"0","papermakers <- read_csv(""data/papermakers_with_places.csv"") %>%"
-"0","  print()"
