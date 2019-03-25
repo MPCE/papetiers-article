@@ -46,11 +46,16 @@ sum_pages <- function(pages) {
   
   require(stringr)
   
+  # Preprocessing to remove errors
+  pages <- str_replace_all(pages, "j", "i") # Some typos in a few titles
+  pages <- str_replace_all(pages, "\\b\\w+,?\\s\\[i.\\s?e\\.", "") # Account for all the 'i.e.'s
+  # Some pages use the hyphens incorrectly, and chain them all together. Fix.
+  incorrect_idx <- str_detect(pages, "\\[?\\w+\\]?-\\[?\\w+\\]?-\\[?\\w+\\]?") %>% which()
+  pages[incorrect_idx] <- str_replace_all(pages[incorrect_idx], "-", " ")
+  
   # Search for roman numerals
-  rom_reg <- regex("
-                  (?<![abcdefghjknopqrstuwxyz]) # do not find a match if there are any non-roman letters or an 'e.' (i.e.)
-                  [ivxlcdm]+  # look for any number of the roman numerals
-                  (?![abcdefghjknopqrstuwxyz]|\\.\\s?e|,?\\s\\[i\\.|-) # do not find a match if there are any non-roman letters, an '.e', an 'i.e.' or a hyphen
+  rom_reg <- regex("\\b[ivxlc]+\\b  # look for a substring comprising only Roman numerals
+                  (?!\\]?-[ivxlc])  # do not find a match if it is followed by a hyphen
                    ", comments = T,
                    ignore_case = T)
   roman <- str_match_all(pages, rom_reg)
@@ -61,17 +66,15 @@ sum_pages <- function(pages) {
   
   # now extract hindu-arabic numerals
   # need negative lookahead for page range issue (see below)
-  # need negative lookahead to ignore numbers followed by 'i.e.', which indicates corrections
-  hindu_arabic <- str_match_all(pages, "\\d+(?!]?-|,?\\s\\[i\\.\\s?e\\.\\s?)")
+  hindu_arabic <- str_match_all(pages, "\\d+\\b(?!\\]?-)")
   hindu_arabic_totals <- sapply(hindu_arabic, function(x) return(sum(as.numeric(x))))
   
   # Now extrac the beginnings of page ranges
   # e.g. if [3]-20 appears in the page description, then there are 20 - 3 + 1 = 18 actual pages.
-  to_deduct_hindu <- str_match_all(pages, "\\d+(?=]?-)") %>%
+  to_deduct_hindu <- str_match_all(pages, "\\d+\\b(?=]?-\\d)") %>%
     sapply(function(x) return(sum(as.numeric(x)) - length(x)))
-  rom_deduct_reg <- regex("
-                      (?<![abcdefghjknopqrstuwxyz]|e\\.\\s?]) # do not find a match if there are any non-roman letters or an 'e.' (i.e.)
-                      [ivxlcdm]+(?=]?-)  # look for any number of the roman numerals followed by a hyphen
+  rom_deduct_reg <- regex("\\b[ivxlc]+\\b     # look for any number of roman numerals
+                      (?=\\]?-\\[?[ivxlc])    # followed by a hyphen
                       ", comments = T,
                       ignore_case = T)
   to_deduct_roman <- str_match_all(pages, rom_deduct_reg) %>%

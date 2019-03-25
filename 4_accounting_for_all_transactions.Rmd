@@ -179,7 +179,10 @@ editions %>%
   scroll_box(height = '400px')
 ```
 
-In nearly all cases the `total_pages` estimate seems to be better than the `quick_pages`, with the exception of examples like `bk0001505` and `bk0004313` where hyphens have been used incorrectly in the 'pages' field. I have not corrected these few errors yet, but I will do so in the underlying database when I get the chance.
+Of these `r editions %>% mutate(diff = total_pages - as.numeric(quick_pages)) %>% filter(abs(diff) > 3) %>% nrow()` cases where `quick_pages` and `total_pages` differ by more than 3, in nearly all the `total_pages` estimate seems to be better than the `quick_pages`. There are two main reasons:
+
+1. The `quick_pages` estimate systematically ignores blank pages
+2. The computer makes fewer arithmetical errors than the humans who entered the `quick_pages`
 
 Now we can be confident that the `total_pages` estimate is solid, we can examine the `sheets_estimate`. As a quick reminder, the formula used to estimate the number of sheets is: $$ sheets = \lceil \frac{pages} {2 \times leaves} \rceil $$ where $leaves$ is the number of leaves each sheets is divided into (e.g. $2$ for a folio edition or $8$ for an octavo), and the $\lceil$ and $\rceil$ symbols indicate that we should round the result up to the nearest whole number, since any excess leaves from the sheet would generally have to be incorporated into the book as blank pages or otherwise wasted.
 
