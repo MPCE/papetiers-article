@@ -24,19 +24,6 @@ library(lubridate)
 knitr::opts_chunk$set(message = FALSE, warning = FALSE)
 ```
 
-```{js echo=FALSE}
-$(function() {
-  /* Lets the user click on the images to view them in full resolution. */
-  $("img").wrap(function() {
-    var link = $('<a/>');
-    link.attr('href', $(this).attr('src'));
-    link.attr('title', $(this).attr('alt'));
-    link.attr('target', '_blank');
-    return link;
-  });
-});
-```
-
 # The Shape of the Data
 
 ```{r message=FALSE, error=FALSE}
@@ -178,9 +165,73 @@ monthly_data %>%
   )
 ```
 
-There may be a very slight trend towards more letters in the latter part of the year, but the p value is > 0.05, the correlation coefficient is low at 0.15, the slope of the regression line, pictured, is only `r monthly_data %>% drop_na() %>% (function(x) lm(x$num_letters ~ x$month)$coefficients[2]) %>% round(3)`, and possible flat or negative slopes lie within the 95% confidence interval (depicted in grey on the graph).
+There may be a very slight trend towards more letters in the latter part of the year, but the p value is > 0.05, the correlation coefficient is low at 0.15, the slope of the regression line, pictured, is only `r monthly_data %>% drop_na() %>% (function(x) lm(x$num_letters ~ x$month)$coefficients[2]) %>% round(3)`, and many flat or negative slopes lie within the 95% confidence interval (depicted in grey on the graph).
 
 In other words, the letter currently provide no evidence of a monthly or quarterly pattern in the STN's correspondence with their papetiers. Perhaps if we extracted information about how much paper they were actually ordering in each letter, a pattern would emerge.
 
-# Comparison with book data
+# Where was the Paper Coming From?
 
+One very useful feature of the letters is that we know who was sending them, and where those people operated. Now we can say with some confidence where the STN was sourcing its paper from at different times. Ideally, we would know which letters actually contained orders for paper. Failing that, just looking at all the letters can give us a rough idea.
+
+**NB:** The place data has all been linked to geonames, and thoroughly checked and updated. The new data is available in the online MPCE 'manuscripts' database.
+
+The cell below imports the place data and links it to the papetiers' letters. You can review the results in the scrollbox.
+
+```{r}
+manuscripts <- dbConnect(MySQL(), dbname = "manuscripts", user = "root", host = "localhost")
+
+# Get place data and information about client's addresses
+place <- fetch_table(manuscripts, "places")
+clients_places <- fetch_table(stn, "clients_addresses")
+
+# Join to letters data
+geo_letters <- letters %>%
+  left_join(clients_places, by = "client_code") %>%
+  left_join(place, by = "place_code") %>%
+  select(date, client_code, client_name, place_code, place_name = name, latitude, longitude, geoname)
+
+# View the data
+geo_letters %>%
+  kable() %>%
+  kable_styling() %>%
+  scroll_box(height = '400px')
+```
+
+The map below shows where the STN was sending its papetier letters between 1776 and 1781. I have focussed on this period, because it is the period for which our data is most complete. It also allows us to include the 66 letters whose precise date we do not know. Although their precise dates must remain mysterious, we know from the STN's indexes that they were sent between 1777 and 1779, so they can be included in the 1776-1781 total.
+
+```{r}
+library(leaflet)
+
+# Choose a good town to centre the map on
+centre <- place %>% filter(name == "BESANCON")
+
+# Define interval we are interested in
+our_interval <- "1776-01-01" %--% "1779-12-31"
+
+# Plot the letters
+letters %>%
+  # Keep letters from CLG1 or that have the correct date
+  filter(ms_code == "CLG1" | date %within% our_interval) %>%
+  # Get clients' addresses
+  left_join(clients_places, by = "client_code") %>%
+  # Aggregate by place
+  group_by(place_code) %>%
+  summarise(num_letters = n()) %>%
+  # Join to place metadata
+  left_join(place, by = "place_code") %>%
+  select(place_code, num_letters, place_name = name, latitude, longitude, geoname) %>%
+  # Pass to leaflet
+  leaflet() %>%
+  # Centre on Bouge
+  setView(lng = centre$longitude, lat = centre$latitude, zoom = 7) %>%
+  # Render map
+  addTiles() %>%
+  # Add consignments
+  addCircles(
+    lng = ~longitude,
+    lat = ~latitude,
+    weight = 1,
+    radius = ~sqrt(num_letters * 10000000),
+    popup = ~paste0(str_to_title(place_name), ": ", num_letters)
+  )
+```
