@@ -1,0 +1,186 @@
+---
+title: "The papetiers correspondence"
+author: Michael Falk
+date: March 25, 2019
+output:
+  html_document:
+    df_print: kable
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    number_sections: true
+    theme: readable
+---
+
+# Introduction
+
+We have two kinds of data at our disposal as we analyse the STN's use of paper. We have information about the books they manufactured and sold. This can tell us how much paper they were using, and for what. The second kind of information derives from their letter-books. Though the data is quite patchy, we essentially know when the STN were sending letters to their paper suppliers, and where needed we can examine the text. Unfortunately, the text of the letters they *received* from their papermakers is in Neuch&acirc;tel, and may be hard to access at the moment.
+
+**NB:** For the dates and text of the letters, we are indebted to Robert Darnton, who has digitised the STN's *Copies de Lettres* and [made them available](http://www.robertdarnton.org/literarytour/copiesdelettres) under a [Creative Commons 4.0](http://www.robertdarnton.org/copyright) licence. Note also that Darnton tends to refer to the manuscripts by their number, whereas in the FBTEE data, a letter code is more often used. So Darnton's MS1105 is FBTEE's MS CLG2. I use both reference systems below.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(kableExtra)
+library(lubridate)
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+```{js echo=FALSE}
+$(function() {
+  /* Lets the user click on the images to view them in full resolution. */
+  $("img").wrap(function() {
+    var link = $('<a/>');
+    link.attr('href', $(this).attr('src'));
+    link.attr('title', $(this).attr('alt'));
+    link.attr('target', '_blank');
+    return link;
+  });
+});
+```
+
+# The Shape of the Data
+
+```{r message=FALSE, error=FALSE}
+source('init.R')
+letters <- readxl::read_xlsx('data/papetier_out_letter_locations_all_dates.xlsx') %>%
+  rename(date = `date (YYYYMMDD)`) %>%
+  mutate(
+    include = replace_na(include, "yes"),
+    date = ymd(date)
+    ) %>%
+  filter(include != "no") # Exclude letters that SB has deemed irrelevant to the paper trade
+```
+
+There are `r nrow(letters)` letters about paper in the suriving letterbooks. There are several gaps in the record. One manuscript mentioned in the STN database, 'CLG1', appears to be lost. We therefore cannot recover the text nor the dates for the letters included within it. We know they must have existed, however, because their existence is attested in MS1106, an index prepared by the STN to their own letterbooks.
+
+This index was digitised as part of the STN database, so we can have a look at the letters and try to make sense of them.
+
+```{r}
+letters %>%
+  filter(ms_code == "CLG1") %>%
+  select(client_code, client_name, ms_code, ms_num, page_ref) %>%
+  kable() %>%
+  kable_styling(full_width = T, fixed_thead = T) %>%
+  scroll_box(height = '300px')
+```
+
+The situation is quite mysterious. On the one hand, it is clear that a volume is missing. MS CLG2 starts on page 821&mdash;it is clear that the missing letters of CLG1 must have once been recorded in the first 820 pages of this book. This is confirmed when we look at all the page references to all the papetier letters in our dataset. The smallest page number for CLG1 is `r filter(letters, ms_code == "CLG1") %>% pull(page_ref) %>% min()`, and the largest is `r filter(letters, ms_code == "CLG1") %>% pull(page_ref) %>% max()`.
+
+What makes it mysterious is that when you look into the actual letterbooks, there is no gap in the dates! The previous book, MS CLF, goes up to February 1778, and GLG2 starts in February 1778. When were the letters in CLG1 sent? According to the index where they are recorded (MS 1106), the missing letters were sent between 1778-1779. But how can this be? CLG2 begins on the 21st of February 1778. Are we to believe that the STN sent 800 pages of correspondnce in January and February 1778, and then took until July 1779 to send their next 800 pages of correspondence? And if the letters were sent in January and February 1778, why were they not recorded in MS CLF, which contains letters from these months?
+
+Unless we can uncover the history of this manuscript books and their indicies, our numbers for 1777-79 is going to be quite suspect.
+
+There are other gaps that we can account for with more certainty. No letters survive at all from December 1781-August 1784. The index for August 1784-June 1787 presents a starker problem: letters A-P are missing, meaning that if any papetiers with surnames in that range sent letters during that period, we likely have no idea.
+
+The graph below gives a sense of the patchiness of the data. It shows a monthly count of the letters the STN sent to the papetiers, as far as we know.
+
+```{r fig.height=3, fig.width=8}
+letters %>%
+  mutate(
+    month = ceiling_date(date, unit = "month")
+  ) %>%
+  group_by(month) %>%
+  summarise(n = n()) %>%
+  ungroup() %>%
+  ggplot(aes(month, n)) +
+  geom_col() +
+  scale_x_date(date_breaks = "3 years", date_labels = "%Y") +
+  scale_y_continuous(breaks = seq(0, 13, 4)) +
+  labs(
+    x = "Year",
+    y = "Letters sent to papetiers",
+    title = "The STN's correspondence with papermakers varied substantially\nfrom month to month",
+    subtitle = "Each column represents all the known letters in one month"
+  ) +
+  theme_minimal()
+  
+```
+
+As the graph shows, we have a good run of apparently complete data from 1776 to 1781, with the caveat noted above, that there are `r filter(letters, ms_code == "CLG1") %>% nrow()` letters that the indices suggest were sent between 1778 and 1779, but whose dates and text are apparently lost. The table below aggregates the data by year. It examines each year in the dataset, and shows how many months we have surviving papetiers' letters for. Between 1776 and 1781, there are letters for at least 9 months of the year for each of these years.
+
+```{r}
+letters %>%
+  mutate(
+    month = month(date),
+    year = year(date)
+  ) %>%
+  group_by(year, month) %>%
+  slice(1) %>%
+  group_by(year) %>%
+  summarise(months_accounted_for = n()) %>%
+  kable() %>%
+  kable_styling(full_width = F) %>%
+  scroll_box(height = '300px')
+```
+
+# The Seasonality of the Trade
+
+Simon was interested to see if there were seasonal variations in the STN's correspondence. So far, the letters do not support such a hypothesis.
+
+The below graph directly compares the number of surviving papetiers letters sent each quarter from 1776 to 1781.
+
+```{r}
+letters %>%
+  mutate(
+    month = month(date),
+    quarter = ceiling(month / 3), # There are three months in a quarter
+    year = year(date) %>% as.character() # Turn into a categorical variable
+  ) %>%
+  filter(year %in% 1776:1781) %>% # Just keep data-rich years
+  group_by(year, quarter) %>%
+  summarise(num_letters = n()) %>%
+  ggplot(aes(x = quarter, y = num_letters, fill = year)) +
+  geom_col(position = "dodge") +
+  theme_minimal() +
+  scale_x_continuous(labels = function(x) paste0("Q", x)) +
+  labs(
+    title = "There is no obvious seasonal rhythm to the number of papetiers' letters",
+    x = "Quarter",
+    y = "Number of letters sent to papetiers",
+    fill = "Year"
+  )
+```
+
+There doesn't seem to be any pronounced annual cycle. In 1776, the most letters were sent in Q1. From 1777-79 (the years of our missing 66 letters), the most letters were sent in Q2. In 1780, the most letters were sent in Q4, and in 1781 the most letters were sent in Q3.
+
+We can test the hypothesis more abstractly, using all our data, with a scatterplot. Is there are relationship between the month of the year and the number of letters sent?
+
+```{r}
+monthly_data <- letters %>%
+  mutate(
+    year = year(date) %>% as.integer(),
+    month = month(date) %>% as.integer()
+  ) %>%
+  group_by(year, month) %>%
+  summarise(num_letters = n())
+
+# Calculate the correlation:
+monthly_test <- monthly_data %>%
+  drop_na() %>%
+  (function(x) cor.test(x$month, x$num_letters))()
+
+# Plot
+monthly_data %>%
+  ggplot(aes(month, num_letters)) +
+  ylim(c(0,15)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,12,3), minor_breaks = NULL) +
+  labs(
+    x = "Month",
+    y = "Number of letters",
+    title = "There is no clear link between the month of the year and\nthe number of papetiers' letters sent",
+    subtitle = paste0(
+      "Correlation coefficient between month and number of letters: ",
+      monthly_test$estimate %>% round(2), " (p \u2248 ", 
+      monthly_test$p.value %>% round(3), ")"
+      )
+  )
+```
+
+There may be a very slight trend towards more letters in the latter part of the year, but the p value is > 0.05, the correlation coefficient is low at 0.15, the slope of the regression line, pictured, is only `r monthly_data %>% drop_na() %>% (function(x) lm(x$num_letters ~ x$month)$coefficients[2]) %>% round(3)`, and possible flat or negative slopes lie within the 95% confidence interval (depicted in grey on the graph).
+
+In other words, the letter currently provide no evidence of a monthly or quarterly pattern in the STN's correspondence with their papetiers. Perhaps if we extracted information about how much paper they were actually ordering in each letter, a pattern would emerge.
+
+# Comparison with book data
+

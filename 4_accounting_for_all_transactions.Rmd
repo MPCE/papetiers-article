@@ -16,6 +16,7 @@ output:
 library(kableExtra)
 knitr::opts_chunk$set(message = FALSE, warning = FALSE)
 ```
+
 # Introduction
 
 The STN database records several types of 'transaction', which have a bearing on the STN's demand for paper. In previous analyses, I have focussed on particular 'out' transactions (broadly speaking, sales). By seeing how many books the STN were selling, I tried to give a sense of how many sheets of paper they were using. It turns out, however, that there are two kinds of 'in' transaction in the database, of particular relevance to our research: 'in (printing)' and 'in (assumed printing)' transactions record print runs; 'Bilan' and 'stock take' transactions record stock sitting in the STN's warehouse at particular points in time
@@ -282,7 +283,7 @@ Following the above analysis, It seems that the print run data is almost there, 
 
 In a following report, I will go into more detail, but for now, let's just quickly compare how the print run data compares to the sales data over time. Can we see the STN bringing in paper and offloading it?
 
-```{r}
+```{r fig.height=4, fig.width=9}
 stn_trans_sheets <- transactions %>%
   mutate(
     # Make all number positive
