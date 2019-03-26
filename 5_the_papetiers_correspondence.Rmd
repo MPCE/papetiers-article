@@ -199,7 +199,7 @@ geo_letters %>%
 
 The map below shows where the STN was sending its papetier letters between 1776 and 1781. I have focussed on this period, because it is the period for which our data is most complete. It also allows us to include the 66 letters whose precise date we do not know. Although their precise dates must remain mysterious, we know from the STN's indexes that they were sent between 1777 and 1779, so they can be included in the 1776-1781 total.
 
-```{r}
+```{r out.width='100%'}
 library(leaflet)
 
 # Choose a good town to centre the map on
@@ -235,3 +235,46 @@ letters %>%
     popup = ~paste0(str_to_title(place_name), ": ", num_letters)
   )
 ```
+
+The map adjusts the analysis of our earlier report. When we consider where the letters were actually being sent, Besançon and Lyon no longer seem so absolutely dominant. Other centres, including Strasbourg, Vuillfans, Mélière and Fribourg appear to have been similarly important to the STN's supply chain, at least during the period 1776-1781, when our data is richest.
+
+Another period for which we have quite complete data is 1770-71. The below map uses just the same code as above to plot the letter locations for this earlier period. The size of the circles has been tripled to account for the fact that this is a two-year period, whereas the previous map considered a six-year period.
+
+```{r echo=FALSE, out.width='100%'}
+# Choose a good town to centre the map on
+new_centre <- place %>% filter(name == "BESANCON")
+
+# Define interval we are interested in
+new_interval <- "1770-01-01" %--% "1771-12-31"
+
+# Plot the letters
+letters %>%
+  # Keep letters from CLG1 or that have the correct date
+  filter(date %within% new_interval) %>%
+  # Get clients' addresses
+  left_join(clients_places, by = "client_code") %>%
+  # Aggregate by place
+  group_by(place_code) %>%
+  summarise(num_letters = n()) %>%
+  # Join to place metadata
+  left_join(place, by = "place_code") %>%
+  select(place_code, num_letters, place_name = name, latitude, longitude, geoname) %>%
+  # Change order of places so that Ardon's big circle doesn't completely cover Arbois' small one
+  arrange(desc(place_name)) %>%
+  # Pass to leaflet
+  leaflet() %>%
+  # Centre on Bouge
+  setView(lng = centre$longitude, lat = centre$latitude, zoom = 7) %>%
+  # Render map
+  addTiles() %>%
+  # Add consignments
+  addCircles(
+    lng = ~longitude,
+    lat = ~latitude,
+    weight = 1,
+    radius = ~sqrt(num_letters * 30000000),
+    popup = ~paste0(str_to_title(place_name), ": ", num_letters)
+  )
+```
+
+Apparently the STN's supply network grew larger and more complex between these two periods. This will bear further analysis.
