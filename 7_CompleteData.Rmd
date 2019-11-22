@@ -1,0 +1,505 @@
+---
+title: "Working with Adjusted Print Run Figures"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+source('init_hidden.R')
+library(lubridate)
+```
+
+First we will import the data.
+
+```{r message=FALSE, warning=FALSE}
+#Get data
+
+work <- mpce %>% fetch_table("work")
+edition <- mpce %>% fetch_table("edition")
+order <- mpce %>% fetch_table("stn_order")
+transaction <- mpce %>% fetch_table("stn_transaction")
+
+adjustment <- readxl::read_excel("data/Book_adjustments_19102019.xlsx") %>%
+  pivot_longer(
+    cols = starts_with("17"),
+    names_to = "year",
+    values_to = "total_number_of_volumes",
+    values_drop_na = T
+  ) %>%
+  mutate(year = as.numeric(year)) %>%
+  group_by(edition, year) %>%
+  summarise(total_number_of_volumes = sum(total_number_of_volumes, na.rm=FALSE)) %>%
+  ungroup() %>% 
+  rename(edition_code = edition) %>% 
+  mutate(
+    direction = 0
+  )
+```
+
+# Balancing the books
+
+Then we need to complete the data. What we want is a decent estimate of how many volumes were printed for each. There are basically three cases:
+* Books whose recorded figures are trustworthy
+* Those whose figures have been adjusted based on surrounding evidence
+* Those which have no print-run data, whose print runs we will estimate from sales figures
+
+This has been a problem on prior analyses, because when we simply add up the data for the STN editions, the books don't balance.
+
+First we filter out all the non-STN editions, and all of the 'neutral' transactions.In order to combine this data with the adjusted data, we need to sum the transaction types by year. We also need to deduct any returns from the out-transaction total.
+
+There was one edition where Simon requested we replace the print-run figures rather than adding missing data. But it turns out there were no print-run figures in the underlying data anyway:
+
+```{r}
+filter(transaction, edition_code == 'bk0000920', str_detect(transaction_description, 'printing')) %>%
+  select(edition_code, transaction_description, total_number_of_volumes)
+```
+
+This simplifies the task of incorporating the spreadsheet, and estimating a print run for all editions without printing data.
+
+```{r}
+# Which editions are we interested in?
+stn_edition_types <- c("STN editions", "Livres en Société: STN joint editions", "Commissioned STN edition")
+
+# Combine raw with adjusted figures
+stn_transaction <- transaction %>%
+  # Just keep in- and out-transactions from STN editions
+  left_join(select(edition, edition_code, edition_type),
+            by = "edition_code") %>% 
+  filter(edition_type %in% stn_edition_types,
+         direction != 3) %>%
+  select(-edition_type) %>% 
+  left_join(order, by = 'order_code') %>%
+  mutate(date = as.integer(date)) %>%
+  # Add a new transaction direction seperating printings from other in-transactions
+  mutate(
+    direction = if_else(str_detect(transaction_description, "printing"), 0L, direction)
+  ) %>% 
+  # Now all printings have direction '0'
+  # Now aggregate by edition, year and direction
+  mutate(year = year(ymd(date))) %>% 
+  group_by(edition_code, year, direction) %>% 
+  # Now aggregate
+  summarise(total_number_of_volumes = sum(total_number_of_volumes, na.rm = T)) %>%
+  ungroup() %>% 
+  # Add in the adjustment spreadsheet
+  bind_rows(adjustment)
+```
+
+Now we have included the adjustments from the spreadsheet, the question is—what data remains incomplete? After the adjustments, the total number of volumes involves finally balances in a believable way. Previously, the records showed that the STN sold 20-30,000 more volumes than it actually printed. Now the figures show that the STN produced or received `r summarise(stn_transaction, sum = sum(total_number_of_volumes)) %>% pull(sum)` more volumes than it sold. This is believable, although it is an extremely small excess. Now we need to estimate the print runs for books that currently have no printing data.
+
+```{r}
+stn_transaction %>%
+  group_by(edition_code, direction) %>%
+  summarise(sum = sum(total_number_of_volumes))
+```
+
+Now let us calculate the most likely year that these books were printed, and a likely print run. The most likely year is the actualyear of the edition, the date of the first transaction, or the imprint year, in that order. The print run is calculated as equal to the net transactions (Out - In), rounded up to the nearest multiple of 100. (This factor of 100 can easily be altered)
+
+```{r}
+# Calculate the best year for each edition (for adding print-runs to unknowns)
+best_year <- transaction %>% 
+  # Get year of first transaction for each edition
+  left_join(order, by = "order_code") %>% 
+  mutate(date = year(ymd(date))) %>% 
+  group_by(edition_code) %>% 
+  arrange(date) %>% 
+  summarise(date = head(date, 1)) %>% 
+  # Add in edition data
+  left_join(edition, by = "edition_code") %>% 
+  filter(edition_type %in% stn_edition_types) %>% 
+  transmute(edition_code = edition_code,
+            imprint_publication_years = na_if(imprint_publication_years, ""),
+            actual_publication_years = na_if(actual_publication_years, ""),
+            best_year = coalesce(
+              str_trunc(actual_publication_years, 4, ellipsis = "") %>% as.numeric(),
+              date,
+              str_trunc(imprint_publication_years, 4, ellipsis = "") %>% as.numeric()
+            )
+  )
+
+# Get all books that have no print-run data
+no_data <- stn_transaction %>% 
+  group_by(edition_code, direction) %>% 
+  summarise(sum = sum(total_number_of_volumes)) %>% 
+  pivot_wider(names_from = direction, values_from = sum) %>% 
+  filter(is.na(`0`)) %>%
+  mutate(printed = ceiling(-sum(`1`, `2`, na.rm = T)/100)*100)
+```
+
+Among these books without print runs, there are several that seem not to have been printed by the STN. The calculated print run is 0 or less than zero, because the number of copies that were brought in exceed the number of copies sold. Most of them are 'joint editions', and were presumably printed by the STN's partners. There are a couple of exceptions. `bk0001998` has been classified as a 'Commissioned Edition', but the events recorded in the database suggest that may actually have been manufactured by a one Samuel Fauche and merely sold by the STN. Likewise `bk0002298` appears to have really been produced by Charles Bosset, while `bk0002395` and `bk0002452` seems really to have been manufactured by Jonas Fauche. Thus it seems correct to exclude these books from our estimates.
+
+```{r}
+no_data %>% 
+  select(-`0`) %>% 
+  filter(printed <= 0) %>%
+  left_join(
+    select(edition, edition_code, edition_type, full_book_title),
+    by = "edition_code"
+  ) %>% 
+  mutate(full_book_title = str_trunc(full_book_title, 25))
+```
+
+So now it is time to join these estimates to the rest of the data.
+
+```{r}
+final_numbers <- no_data %>% 
+  # Filter out editions the STN probably didn't print
+  filter(printed > 0) %>% 
+  # Get the best year
+  left_join(best_year, by = "edition_code") %>% 
+  # Just keep key variables and reformat
+  select(edition_code, year = best_year, total_number_of_volumes = printed) %>% 
+  # Add in direction coding
+  mutate(direction = 0) %>% 
+  # Join to the rest of the data
+  bind_rows(stn_transaction)
+```
+
+Now we have reasonably reliable print runs for all STN editions. Do the books now balance?
+
+```{r}
+final_numbers %>% 
+  group_by(direction) %>% 
+  summarise(volumes = sum(total_number_of_volumes)) %>% 
+  mutate(direction = recode(direction, `0` ='printed', `1` = 'other in', `2` = 'out')) %>% 
+  add_row(direction = 'TOTAL', volumes = sum(final_numbers$total_number_of_volumes))
+```
+
+Now the books finally balance. According to our figures, the STN manufactured or received `r sum(final_numbers$total_number_of_volumes)` more books than they sold or otherwise sent out.
+
+# Estimating Paper Requirements
+
+**NB:** There is some uncertainty about how to interpret the pagination records. But this will only result in a sheet or two's difference here or there. We can revist to tweak the final numbers before publication.
+
+```{r}
+full_sheets_data <- final_numbers %>% 
+  left_join(
+    select(edition, edition_code, pages, edition, number_of_volumes),
+    by = "edition_code"
+  ) %>% 
+  ungroup() %>% 
+  mutate(
+    calculated_pages = sum_pages(pages),
+    leaves = str_replace(edition, "[fF]", "2"),
+    leaves = str_remove_all(leaves, "\\D"),
+    leaves = as.numeric(leaves),
+    calculated_sheets = calculate_sheets(calculated_pages, leaves),
+    sheets_transacted = calculated_sheets * total_number_of_volumes / number_of_volumes,
+    direction = as_factor(direction) %>% recode(`0` = "Printing", `1` = "Other In", `2` = "Out")
+  ) %>% 
+  select(
+    edition_code,
+    year,
+    direction,
+    pagination = pages,
+    calculated_pages,
+    edition,
+    leaves,
+    calculated_sheets,
+    vols_per_copy = number_of_volumes,
+    vols_transacted = total_number_of_volumes,
+    sheets_transacted
+  )
+```
+
+# Have a little look...
+
+So we have completely revised the data now, trying to account for the print runs, and all other transactions. Let's have a quick look at how it all works now.
+
+```{r}
+full_sheets_data %>%
+  mutate(direction = fct_collapse(direction, Printing = c("Printing"), `Net Out` = c("Other In", "Out"))) %>% 
+  group_by(direction, year) %>% 
+  summarise(sheets_transacted = sum(sheets_transacted, na.rm = T)) %>% 
+  mutate(sheets_transacted = abs(sheets_transacted)) %>% 
+  ggplot(aes(year, sheets_transacted, colour = direction)) +
+  geom_line() +
+  scale_x_continuous(
+    breaks = seq(1769, 1793, 4),
+    minor_breaks = seq(1771, 1793, 4)
+  ) +
+  labs(
+    x = "Year",
+    y = "Sheets Transacted",
+    colour = "Direction"
+  )
+```
+
+# What to do with the gaps?
+
+Now the old issue raises its head once more—what to do about the gaps in the data? Let's try to get a sense of the problem.
+
+```{r}
+full_sheets_data %>% 
+  filter(direction == "Printing") %>% 
+  group_by(year, sheets_known = !is.na(calculated_sheets)) %>% 
+  summarise(transactions = n(),
+            volumes = sum(vols_transacted)) %>% 
+  ggplot(aes(year, volumes, fill = sheets_known)) +
+  geom_col(position = "dodge")
+```
+
+For the books where we do know the number of sheets, is the mean a good approximation of their value? Firstly, for how many books do we know the publishing format?
+
+```{r}
+full_sheets_data %>% 
+  select(edition_code, leaves, calculated_sheets) %>% 
+  group_by(edition_code) %>% 
+  slice(1) %>% 
+  group_by(leaves) %>% 
+  summarise(editions = n())
+```
+
+Let's consider average sheets per volume in each format. How much variation is there?
+
+```{r}
+format_centres <- full_sheets_data %>% 
+  distinct(edition_code, .keep_all = T) %>% 
+  group_by(leaves) %>% 
+  mutate(sheets_per_copy = calculated_sheets / vols_per_copy) %>%
+  summarise(
+    mean = mean(sheets_per_copy, na.rm = T),
+    median = median(sheets_per_copy, na.rm = T)
+    ) %>% 
+  drop_na() %T>%
+  print()
+```
+
+```{r}
+full_sheets_data %>% 
+  select(edition_code, vols_per_copy, leaves, calculated_sheets) %>% 
+  distinct(edition_code, .keep_all = T) %>% 
+  drop_na() %>% 
+  mutate(sheets_per_vol = calculated_sheets / vols_per_copy) %>% 
+  ggplot(aes(sheets_per_vol)) +
+  facet_wrap(~ leaves, labeller = as_labeller(c(`2` = "Folio", `4` = "Quarto", `8` = "Octavo", `12` = "Duodecimo"))) +
+  geom_histogram(binwidth = 4) +
+  geom_vline(aes(xintercept = mean), data = format_centres, colour = "blue") +
+  geom_vline(aes(xintercept = median), data = format_centres, colour = "red") +
+  labs(
+    y = "Number of Editions",
+    x = "Sheets per Volume",
+    title = "For Octavo and Duodecimo Books, the mean seems a good estimate",
+    subtitle = "Mean (blue) and Median (red) marked by vertical lines"
+  )
+```
+
+For Quarto and Duodecimo books, the median number of sheets used is 16. If we could assume that all the books whose format we don't know were published in one of these common formats, then it would be reasonable to estimate 16 sheets per volume for each one. This would of course be a rather rough estimate.
+
+Some books had sheets data manually entered, though the quality of this data is suspect. As discussed in a previous notebook, there appears to be some inconsistency in what was actually entered in the column. But let's see if we can get some sheets data from there.
+
+```{r}
+full_sheets_data %>% 
+  select(edition_code, vols_per_copy, leaves, calculated_sheets) %>% 
+  distinct(edition_code, .keep_all = T) %>% 
+  filter(is.na(calculated_sheets)) %>% 
+  left_join(select(edition, edition_code, book_sheets))
+```
+
+So, what would happen if we estimated 16 sheets per volume for all unknown quartos and duodecimos, and used the book_sheets data if available for the other books (ignoring book_sheets data that cannot be automatically interpreted, for instance if there are multiple numbers given in the field).
+
+```{r}
+adjusted_sheets_data <- full_sheets_data %>% 
+  # Get median sheets for format
+  left_join(filter(format_centres, leaves > 5) %>% select(leaves, median), by = "leaves") %>% 
+  # Get book sheets data for edition
+  left_join(select(edition, edition_code, book_sheets), by = "edition_code") %>%
+  # Scrap any book sheets data that has any non-numeric characters
+  mutate(book_sheets = as.numeric(book_sheets)) %>% 
+  mutate(calculated_sheets = coalesce(calculated_sheets, book_sheets, median * vols_per_copy))
+
+adjusted_sheets_data %>% 
+  group_by(sheet_data = !is.na(calculated_sheets), direction) %>% 
+  summarise(total_vols = sum(vols_transacted))
+```
+
+There are still many transactions that have no sheet data attached.About a sixth of the transacted volumes still have no estimate of their paper requirements.
+
+What if we simply took the mean number of sheets per volume for *all* volumes, regardless of format? First let's look at a histogram:
+
+```{r}
+adjusted_sheets_data %>% 
+  distinct(edition_code, .keep_all = T) %>% 
+  ggplot(aes(calculated_sheets)) +
+  geom_histogram() +
+  geom_vline(data = adjusted_sheets_data, aes(xintercept = mean(calculated_sheets, na.rm = T)), colour = "blue") + 
+  geom_vline(data = adjusted_sheets_data, aes(xintercept = median(calculated_sheets, na.rm = T)), colour = "red")
+```
+
+The data is very skewed, so it is difficult to be confident in its central tendency. But perhaps we could assume that massive works, taking tens or hundreds of sheets per volume, would likely have had pagination data available in the porject's main sources. The 30 books without sheet data probably all fell within the lower band of possible page ranges.
+
+```{r}
+adjusted_sheets_data %>% 
+  distinct(edition_code, .keep_all = T) %>% 
+  select(calculated_sheets) %>% 
+  drop_na() %>% 
+  ggplot(aes(y = calculated_sheets)) +
+  geom_boxplot()
+```
+
+Previously, I had tried to estimate the missing data by comparing the sheets to the number of volumes sold. I thought there might be a correlation—generally, bigger selling titles might have a lesser number of sheets. But the correlation was not so strong and the structure of the data was complex. I think it might be better to estimate the final 30 or so titles by giving a range of possible values, namely the 25% quartile, median and 75% quartile of the calculated sheets for all STN editions.
+
+```{r}
+key_vars <- adjusted_sheets_data %>% 
+  distinct(edition_code, .keep_all = T) %>% 
+  transmute(sheets_per_vol = calculated_sheets / vols_per_copy) %>% 
+  summarise(
+    lower = quantile(sheets_per_vol, 0.25, na.rm = T),
+    middle = quantile(sheets_per_vol, 0.5, na.rm = T),
+    upper = quantile(sheets_per_vol, 0.75, na.rm = T)
+  )
+
+lower <- adjusted_sheets_data %>% 
+  mutate(calculated_sheets = coalesce(calculated_sheets, key_vars$lower * vols_per_copy)) %>% 
+  group_by(year, direction) %>% 
+  summarise(sheets_transacted = sum(calculated_sheets / vols_per_copy * vols_transacted))
+middle <- adjusted_sheets_data %>% 
+  mutate(calculated_sheets = coalesce(calculated_sheets, key_vars$middle * vols_per_copy)) %>% 
+  group_by(year, direction) %>% 
+  summarise(sheets_transacted = sum(calculated_sheets / vols_per_copy * vols_transacted))
+upper <- adjusted_sheets_data %>% 
+  mutate(calculated_sheets = coalesce(calculated_sheets, key_vars$upper * vols_per_copy)) %>% 
+  group_by(year, direction) %>% 
+  summarise(sheets_transacted = sum(calculated_sheets / vols_per_copy * vols_transacted))
+adjusted_summarised <- adjusted_sheets_data %>% 
+  group_by(year, direction) %>% 
+  summarise(sheets_transacted = sum(calculated_sheets / vols_per_copy * vols_transacted, na.rm = T))
+
+all_estimates <- bind_rows(
+  list(
+    raw = adjusted_summarised,
+    lower = lower,
+    middle = middle,
+    upper = upper),
+  .id = "group"
+) %>% 
+  group_by(group, year, direction) %>% 
+  summarise(sheets_transacted = sum(sheets_transacted)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = direction, values_from = sheets_transacted) %>% 
+  replace_na(list(sheets_transacted = 0)) %>% 
+  mutate(`Net Out` = abs(`Other In` + `Out`)) %>% 
+  select(-`Other In`, -`Out`) %>% 
+  pivot_longer(cols = c("Printing", "Net Out"), names_to = "direction", values_to = "sheets_transacted") %T>%
+  write_excel_csv("final_estimates_for_simon.csv")
+
+all_estimates %>% 
+  ggplot(aes(year, sheets_transacted, colour = direction)) +
+  facet_wrap(~group) +
+  geom_line() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "The general picture is similar however we estimate the missing data",
+    subtitle = "The STN's demand for paper seems to have tracked their sales,\nexcept for two periods in the late 1770s and the early 1780s, where they may have\noverestimated demand for their books.",
+    x = "Year",
+    y = "Sheets Transacted",
+    colour = "Direction of\nTransaction"
+  )
+```
+
+Now to include the data on the *encyclopedie*.
+
+```{r}
+
+inc_encyclopedie <- all_estimates %>% 
+  filter(group == 'middle', direction == 'Printing') %>% 
+  select(year, sheets_transacted) %>% 
+  left_join(
+    tibble(
+      year = c(1777,1778,1779),
+      sheets_transacted = c(540000,2208250,116000)
+    )
+  ) %>% 
+  filter(!is.na(year))
+
+pdf("final_estimate_inc_encyclopedie.pdf", width = 7, height = 5)
+inc_encyclopedie %>% 
+  ggplot(aes(year, sheets_transacted)) +
+  geom_line() +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(limits = c(1768, 1792), breaks = seq(1768, 1792, 4), minor_breaks = seq(1770, 1790, 4)) +
+  labs(
+    title = "Paper requirements varied considerably year-on-year",
+    subtitle = "Total estimated paper required to print the STN's catalogue,\nbased on known and inferred print-runs (annualised)",
+    y = "Sheets Required",
+    x = "Year"
+  )
+dev.off()
+
+inc_encyclopedie %>%
+  write_excel_csv("full_printing_paper_estimates.csv")
+  
+```
+
+Another question. How important were blockbuster editions as a component of overall paper needs?
+
+```{r}
+edition_paper_needs <- full_sheets_data %>% 
+  filter(direction == "Printing") %>% 
+  group_by(edition_code) %>% 
+  summarise(sheets_transacted = sum(sheets_transacted, na.rm = T)) %>%
+  bind_rows(tibble(edition_code = "encyclopedie", sheets_transacted = sum(540000,2208250,116000))) %>% 
+  mutate(proportion = sheets_transacted / sum(sheets_transacted)) %>%
+  arrange(desc(sheets_transacted)) %>% 
+  mutate(order = seq.int(sheets_transacted))
+
+pdf("paper_needs_distribution.pdf", width = 7, height = 5)
+edition_paper_needs %>% 
+  ggplot(aes(x = order, y = sheets_transacted)) +
+  geom_point() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "A small number of blockbuster editions dominated the STN's paper needs",
+    y = "Total Sheets for Edition (printings)",
+    x = "Edition (ranked in order of paper needs)"
+  )
+dev.off()
+
+top_ns = c(1, 5, 10, 20, 50, nrow(edition_paper_needs))
+
+top_n_books = function(n) {
+  edition_paper_needs %>% 
+    top_n(n, wt = sheets_transacted) %>%
+    summarise(sheets_transacted = sum(sheets_transacted),
+              proportion = sum(proportion)) %>% 
+    mutate(n = n,
+           proportion = scales::percent(proportion)) %>% 
+    select(n, sheets_transacted, proportion)
+}
+
+map_df(top_ns, top_n_books) %T>% 
+  write_excel_csv("dominance_of_biggest_editions.csv")
+
+edition_paper_needs %>% 
+  top_n(10, wt = sheets_transacted) %>% 
+  left_join(select(edition, edition_code, full_book_title), by = "edition_code") %>% 
+  mutate(proportion = scales::percent(proportion)) %>% 
+  select(edition_code, full_book_title, rank = order, sheets_transacted, proportion) %T>%
+  write_excel_csv("top_ten_editions.csv")
+
+```
+
+Another key question is: how long did it take the STN to sell its editions? This is key to understanding the dynamics of the paper trade, because of high marginal costs in the industry. The paper to make the edition was the largest upfront cost, and was obviously directly proportion to the size of the edition. It would therefore be very difficult to produce new editions before existing ones sold, and the publisher's ability to turn over editions would directly impact their ability to buy more paper. 
+
+First we need a subset of editions, for which we have relatively complete printing and sales data.
+
+```{r}
+velocity_subset <- stn_transaction %>% 
+  group_by(edition_code, direction) %>% 
+  summarise(vols_transacted = sum(total_number_of_volumes, na.rm = T)) %>% 
+  pivot_wider(names_from = "direction", values_from = vols_transacted) %>% 
+  ungroup() %>% 
+  transmute(
+    edition_code = edition_code,
+    printed = replace_na(`0`, 0),
+    net_out = replace_na(`2`, 0) + replace_na(`1`, 0),
+    balance = printed + net_out
+    ) %>% 
+  filter(
+    printed > 0,
+    balance > 0,
+    balance < printed
+  )
+  
+```

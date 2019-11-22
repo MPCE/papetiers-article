@@ -1,0 +1,96 @@
+---
+title: "Papetiers Report 6"
+output: html_notebook
+---
+
+# Introduction
+
+Since performing our last analysis, I have received a new insight into the data. The main reason there is a mismatch between the print run and sales data is that print runs are not available for every edition.
+
+In this notebook, I finally try to get a good grasp on the relationship between print runs, sales and stocktakes in the data. I also try to estimate the 'wastage', that is, how much excess paper was required to produce a given edition. It is not clear what the STN did with remaindered stock. Once we understand the wastage, it might be possible to reconstruct the paper requirements for editions whose print runs we do not know.
+
+Moreover, SB has informed me that the STN tended to produce print runs with a standard number of copies, e.g. 250, 300, 500, 750, 1000, 1250, 1500, 2000, 3000, 4000, 5000, 6000, 10000. So in cases where print runs are not available, we may be able to round our estimates to produce a more realistic print run total.
+
+```{r}
+source('init_hidden.R')
+library(lubridate)
+```
+
+# Which editions do we have print run and sales data for?
+```{r}
+# Get key metadata
+edition <- mpce %>% fetch_table("edition")
+order <- mpce %>% fetch_table("stn_order")
+place <- mpce %>% fetch_table("place")
+client <- mpce %>% fetch_table("stn_client")
+
+# Import and filter transaction data
+stn_edition_types <- c("STN editions", "Livres en Société: STN joint editions", "Commissioned STN edition")
+transaction <- mpce %>% fetch_table("stn_transaction") %>% 
+  left_join(edition, by = "edition_code") %>% 
+  filter(edition_type %in% stn_edition_types) %>%
+  left_join(order, by = 'order_code') %>%
+  mutate(date = as.integer(date)) %>%
+  select(work_code = work_code.x, -work_code.y, everything())
+```
+
+Let's get a first rough idea. How many editions do we have print runs for? There are `r transaction %>% pull(edition_code) %>% unique() %>% length()` unique STN editions in the transaction data. Of these, `r transaction %>% filter(transaction_description == 'In (printing)') %>% distinct(edition_code) %>% nrow()` have print run data available. A further `r transaction %>% filter(transaction_description == 'In (assumed printing)') %>% distinct(edition_code) %>% nrow()` have assumed print runs.
+
+So only a subset have print-run data. The question is, how complete is the print-run data for these editions, and what proportion of the STN's total output do they represent?
+
+```{r}
+print_run_editions <- transaction %>%
+  filter(str_detect(transaction_description, "printing")) %>% 
+  distinct(work_code) %>%
+  pull()
+
+transaction %>% 
+  filter(work_code %in% print_run_editions) %>% 
+  group_by(work_code) %>%
+  arrange(date) %>% 
+  summarise(balance = sum(total_number_of_volumes[direction < 3]),
+            actually_printed = sum(total_number_of_volumes[transaction_description == "In (printing)"]),
+            assumed_printed = sum(total_number_of_volumes[transaction_description == "In (assumed printing)"]),
+            other_in = sum(total_number_of_volumes[!transaction_description %in% c("In (printing)", "In (assumed printing)") & direction == 1]),
+            sold = sum(total_number_of_volumes[direction == 2]),
+            stocktakes = paste0(total_number_of_volumes[direction == 3], collapse = "; "),
+            full_book_title = head(full_book_title, 1)) %>%
+  arrange(balance) %T>%
+  write_excel_csv("balancing_books.csv")
+```
+
+The editions with print run data account for `r (transaction %>% filter(edition_code %in% print_run_editions, direction == 2) %>% pull(total_number_of_volumes) %>% sum(na.rm = T) / filter(transaction, direction == 2) %>% pull(total_number_of_volumes) %>% sum(na.rum = T)) * 100 %>% print(d = 1)`% of sales.
+
+Let's look at one of these editions, and see if we can work out what is going on. One edition that has a big mismatch between the amount printed and the number sold is bk0001961, *`r edition %>% filter(edition_code == 'bk0001961') %>% pull(full_book_title)`*.
+
+```{r}
+transaction %>%
+  filter(edition_code == 'bk0000875') %>%
+  select(transaction_description, date, total_number_of_volumes, client_code) %>%
+  arrange(date)
+```
+
+Some of the books clearly have quite complete data. Consider bk0000875, `r filter(edition, edition_code == 'bk0000875') %>% pull(full_book_title)`.
+
+```{r}
+example_data <- transaction %>%
+  filter(edition_code == 'bk0000875') %>%
+  arrange(date) %>% 
+  mutate(date = ymd(date))
+
+example_data %>%
+  ggplot(aes(x = date, y = vols)) +
+  geom_line(data = filter(example_data, direction < 3) %>% mutate(vols = cumsum(total_number_of_volumes))) +
+  geom_point(data = filter(example_data, direction == 3) %>% mutate(vols = total_number_of_volumes))
+```
+
+The graph shows the cumulative sum of volumes of the book, from an initial print run of 1003 on the 2st of August 1777, to a final balance of a bit less than 70 books left after 1787. The points on the graph are the number of volumes recorded in the periodic stocktakes undertaken by the STN.
+
+# Constructing a good sample
+
+How can we find all the books in the data like bk0000875, which have consistent printing and sales data?
+
+Some possibilities:
+* filter out all books whose in and out transactions differ by more than 10%
+* filter out all books whose cumulative transaction totals drop below 0 at any point
+* just focus on the manuscripts that are known to be most accurate

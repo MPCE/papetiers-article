@@ -1,0 +1,217 @@
+﻿group,year,direction,sheets_transacted
+lower,1769,Printing,6000
+lower,1769,Net Out,NA
+lower,1770,Printing,463135.44444444444
+lower,1770,Net Out,202606.11111111112
+lower,1771,Printing,568881.6666666667
+lower,1771,Net Out,382503.8888888889
+lower,1772,Printing,524426.8888888889
+lower,1772,Net Out,487592.05555555556
+lower,1773,Printing,1246139
+lower,1773,Net Out,1113773.2777777778
+lower,1774,Printing,590086
+lower,1774,Net Out,302655.9444444445
+lower,1775,Printing,513650
+lower,1775,Net Out,349340.9682539682
+lower,1776,Printing,199713
+lower,1776,Net Out,268574.126984127
+lower,1777,Printing,791753.5
+lower,1777,Net Out,290473.4246031746
+lower,1778,Printing,224029
+lower,1778,Net Out,239097.80555555556
+lower,1779,Printing,2022066
+lower,1779,Net Out,556635.6785714285
+lower,1780,Printing,334209
+lower,1780,Net Out,601329.4166666666
+lower,1781,Printing,809244
+lower,1781,Net Out,942937.2301587302
+lower,1782,Printing,2697077.3333333335
+lower,1782,Net Out,2284833.972222222
+lower,1783,Printing,1426624
+lower,1783,Net Out,982426.911111111
+lower,1784,Printing,264040
+lower,1784,Net Out,570404.0333333333
+lower,1785,Printing,160030.5
+lower,1785,Net Out,784962.7999999999
+lower,1786,Printing,48596
+lower,1786,Net Out,331717
+lower,1787,Printing,188516
+lower,1787,Net Out,601112.1
+lower,1788,Printing,40580
+lower,1788,Net Out,73676.11666666667
+lower,1789,Printing,NA
+lower,1789,Net Out,NA
+lower,1790,Printing,12250
+lower,1790,Net Out,10596.8
+lower,1791,Printing,2100
+lower,1791,Net Out,48186.200000000004
+lower,1792,Printing,NA
+lower,1792,Net Out,36027
+lower,1793,Printing,NA
+lower,1793,Net Out,NA
+lower,1794,Printing,NA
+lower,1794,Net Out,6446
+lower,NA,Printing,21115
+lower,NA,Net Out,368
+middle,1769,Printing,6000
+middle,1769,Net Out,NA
+middle,1770,Printing,527935.4444444445
+middle,1770,Net Out,212086.11111111112
+middle,1771,Printing,596881.6666666667
+middle,1771,Net Out,409703.8888888889
+middle,1772,Printing,542026.8888888889
+middle,1772,Net Out,492800.05555555556
+middle,1773,Printing,1281339
+middle,1773,Net Out,1114149.2777777778
+middle,1774,Printing,652246
+middle,1774,Net Out,322079.9444444445
+middle,1775,Printing,533794
+middle,1775,Net Out,370476.9682539682
+middle,1776,Printing,258113
+middle,1776,Net Out,289254.126984127
+middle,1777,Printing,839753.5
+middle,1777,Net Out,310633.4246031746
+middle,1778,Printing,230269
+middle,1778,Net Out,252737.80555555556
+middle,1779,Printing,2062962
+middle,1779,Net Out,578659.6785714285
+middle,1780,Printing,416353
+middle,1780,Net Out,645185.4166666666
+middle,1781,Printing,896604
+middle,1781,Net Out,994489.2301587302
+middle,1782,Printing,2768277.3333333335
+middle,1782,Net Out,2383849.972222222
+middle,1783,Printing,1633824
+middle,1783,Net Out,1066914.911111111
+middle,1784,Printing,267240
+middle,1784,Net Out,582436.0333333333
+middle,1785,Printing,177102.5
+middle,1785,Net Out,872930.7999999999
+middle,1786,Printing,48596
+middle,1786,Net Out,334533
+middle,1787,Printing,200516
+middle,1787,Net Out,618600.1
+middle,1788,Printing,40580
+middle,1788,Net Out,74452.11666666667
+middle,1789,Printing,NA
+middle,1789,Net Out,NA
+middle,1790,Printing,12250
+middle,1790,Net Out,11348.8
+middle,1791,Printing,2100
+middle,1791,Net Out,50306.200000000004
+middle,1792,Printing,NA
+middle,1792,Net Out,32075
+middle,1793,Printing,NA
+middle,1793,Net Out,NA
+middle,1794,Printing,NA
+middle,1794,Net Out,6134
+middle,NA,Printing,21115
+middle,NA,Net Out,368
+raw,1769,Printing,6000
+raw,1769,Net Out,NA
+raw,1770,Printing,398335.44444444444
+raw,1770,Net Out,193126.11111111112
+raw,1771,Printing,540881.6666666667
+raw,1771,Net Out,355303.8888888889
+raw,1772,Printing,506826.8888888889
+raw,1772,Net Out,482384.05555555556
+raw,1773,Printing,1210939
+raw,1773,Net Out,1113397.2777777778
+raw,1774,Printing,527926
+raw,1774,Net Out,283231.9444444445
+raw,1775,Printing,493506
+raw,1775,Net Out,328204.9682539682
+raw,1776,Printing,141313
+raw,1776,Net Out,247894.12698412698
+raw,1777,Printing,743753.5
+raw,1777,Net Out,270313.4246031746
+raw,1778,Printing,217789
+raw,1778,Net Out,225457.80555555556
+raw,1779,Printing,1981170
+raw,1779,Net Out,534611.6785714285
+raw,1780,Printing,252065
+raw,1780,Net Out,557473.4166666666
+raw,1781,Printing,721884
+raw,1781,Net Out,891385.2301587302
+raw,1782,Printing,2625877.3333333335
+raw,1782,Net Out,2185817.972222222
+raw,1783,Printing,1219424
+raw,1783,Net Out,897938.9111111112
+raw,1784,Printing,260840
+raw,1784,Net Out,558372.0333333333
+raw,1785,Printing,142958.5
+raw,1785,Net Out,696994.7999999999
+raw,1786,Printing,48596
+raw,1786,Net Out,328901
+raw,1787,Printing,176516
+raw,1787,Net Out,583624.1
+raw,1788,Printing,40580
+raw,1788,Net Out,72900.11666666667
+raw,1789,Printing,NA
+raw,1789,Net Out,NA
+raw,1790,Printing,12250
+raw,1790,Net Out,9844.8
+raw,1791,Printing,2100
+raw,1791,Net Out,46066.200000000004
+raw,1792,Printing,NA
+raw,1792,Net Out,39979
+raw,1793,Printing,NA
+raw,1793,Net Out,NA
+raw,1794,Printing,NA
+raw,1794,Net Out,6758
+raw,NA,Printing,21115
+raw,NA,Net Out,368
+upper,1769,Printing,6000
+upper,1769,Net Out,NA
+upper,1770,Printing,568435.4444444445
+upper,1770,Net Out,218011.11111111112
+upper,1771,Printing,614381.6666666667
+upper,1771,Net Out,426703.8888888889
+upper,1772,Printing,553026.8888888889
+upper,1772,Net Out,496055.05555555556
+upper,1773,Printing,1303339
+upper,1773,Net Out,1114384.2777777778
+upper,1774,Printing,691096
+upper,1774,Net Out,334219.9444444445
+upper,1775,Printing,546384
+upper,1775,Net Out,383686.9682539682
+upper,1776,Printing,294613
+upper,1776,Net Out,302179.126984127
+upper,1777,Printing,869753.5
+upper,1777,Net Out,323233.4246031746
+upper,1778,Printing,234169
+upper,1778,Net Out,261262.80555555556
+upper,1779,Printing,2088522
+upper,1779,Net Out,592424.6785714285
+upper,1780,Printing,467693
+upper,1780,Net Out,672595.4166666666
+upper,1781,Printing,951204
+upper,1781,Net Out,1026709.2301587302
+upper,1782,Printing,2812777.3333333335
+upper,1782,Net Out,2445734.972222222
+upper,1783,Printing,1763324
+upper,1783,Net Out,1119719.911111111
+upper,1784,Printing,269240
+upper,1784,Net Out,589956.0333333333
+upper,1785,Printing,187772.5
+upper,1785,Net Out,927910.7999999999
+upper,1786,Printing,48596
+upper,1786,Net Out,336293
+upper,1787,Printing,208016
+upper,1787,Net Out,629530.1
+upper,1788,Printing,40580
+upper,1788,Net Out,74937.11666666667
+upper,1789,Printing,NA
+upper,1789,Net Out,NA
+upper,1790,Printing,12250
+upper,1790,Net Out,11818.8
+upper,1791,Printing,2100
+upper,1791,Net Out,51631.200000000004
+upper,1792,Printing,NA
+upper,1792,Net Out,29605
+upper,1793,Printing,NA
+upper,1793,Net Out,NA
+upper,1794,Printing,NA
+upper,1794,Net Out,5939
+upper,NA,Printing,21115
+upper,NA,Net Out,368

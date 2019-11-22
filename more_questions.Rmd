@@ -1,0 +1,30 @@
+---
+title: "Key Questions"
+output: html_notebook
+---
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+source('init_hidden.R')
+library(lubridate)
+
+work <- mpce %>% fetch_table("work")
+edition <- mpce %>% fetch_table("edition")
+order <- mpce %>% fetch_table("stn_order")
+transaction <- mpce %>% fetch_table("stn_transaction")
+
+# Which editions are we interested in?
+stn_edition_types <- c("STN editions", "Livres en Société: STN joint editions", "Commissioned STN edition")
+
+# Get all transactions for STN editions
+stn_transaction <- transaction %>%
+  # Just keep in- and out-transactions from STN editions
+  left_join(select(edition, edition_code, edition_type, full_book_title),
+            by = "edition_code") %>% 
+  filter(edition_type %in% stn_edition_types,
+         direction != 3) %>%
+  select(-edition_type) %>% 
+  left_join(order, by = 'order_code') %>%
+  mutate(date = ymd(date))
+```
+
+What we want is a scatterplot, where each point is an edit
